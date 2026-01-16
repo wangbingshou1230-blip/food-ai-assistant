@@ -7,17 +7,43 @@ import PyPDF2
 import matplotlib.pyplot as plt
 import os
 
-# ================= 1. 基础配置与工具函数 =================
+# 1. 基础配置
 st.set_page_config(page_title="FoodAI 科研中台 Pro", page_icon="🧬", layout="wide")
 
-# 加载配置 (和之前一样，从 config.json 读 Key)
-# 加载配置 (双模式：本地 json 或 云端 secrets)
+# ================= 🔐 安全登录模块 =================
+def check_password():
+    """检查密码是否正确"""
+    if "password_correct" not in st.session_state:
+        st.session_state.password_correct = False
+
+    if st.session_state.password_correct:
+        return True # 已登录
+
+    # 显示输入框
+    st.markdown("### 🔒 请输入访问密码")
+    pwd = st.text_input("Password", type="password")
+    
+    # 验证逻辑 (这里我们把密码设为 123456，你也可以去 secrets 里改)
+    if st.button("登录"):
+        if pwd == st.secrets.get("app_password", "123456"): # 优先读取云端配置的密码
+            st.session_state.password_correct = True
+            st.rerun() # 刷新页面进入系统
+        else:
+            st.error("❌ 密码错误")
+    return False
+
+# 如果没登录，就停止运行下面的代码
+if not check_password():
+    st.stop()
+# ================================================
+
+# ... (以下是原来的所有功能代码，保持不变) ...
+
+# 加载配置
 def load_config():
-    # 1. 优先尝试读取本地 config.json (你在自己电脑上跑时用这个)
     if os.path.exists("config.json"):
         with open("config.json", "r", encoding="utf-8") as f:
             return json.load(f)
-    # 2. 如果本地找不到，尝试读取 Streamlit 云端机密 (部署后用这个)
     elif hasattr(st, "secrets"):
         return st.secrets
     return {}
@@ -26,18 +52,15 @@ CONFIG = load_config()
 API_KEY = CONFIG.get("deepseek_api_key", "")
 PROXY_URL = CONFIG.get("proxy_url", "")
 
-# 侧边栏状态栏
+# 侧边栏
 with st.sidebar:
     st.title("🎛️ 控制台")
-    if API_KEY:
-        st.success("✅ DeepSeek Key 已加载")
-    else:
-        st.error("❌ 未检测到 Key，请检查 config.json")
-    
-    st.info("模式：Web 全栈版")
+    st.success(f"✅ 已安全登录") # 登录成功提示
     page = st.radio("功能导航", ["📢 行业情报监测", "📄 文献智能阅读", "📈 实验数据分析"])
 
-# --- 核心函数 (直接复用你之前的代码) ---
+# --- 后面所有的函数和页面逻辑(search_bing, ask_deepseek等)全部照搬原来的 ---
+# (请把之前代码里 check_password 之后的部分全部粘贴在这里)
+# ...
 def search_bing(q):
     """真·爬虫模块"""
     headers = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" }
