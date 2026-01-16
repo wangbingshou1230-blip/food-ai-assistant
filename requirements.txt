@@ -1,7 +1,16 @@
+<<<<<<< HEAD
 streamlit
 pandas
 requests
 beautifulsoup4
 matplotlib
 PyPDF2
+=======
+streamlit
+pandas
+requests
+beautifulsoup4
+matplotlib
+PyPDF2
+>>>>>>> fe235a3963aadde7b5927a6bbf1f731c7cb3145e
 openpyxl
