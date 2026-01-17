@@ -7,12 +7,12 @@ import pdfplumber
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
 from collections import Counter
-from datetime import datetime # 用于记录时间
+from datetime import datetime
 
 # ================= ⚙️ 1. 全局配置 =================
 st.set_page_config(
     page_title="FoodAI 全能工作台", 
-    page_icon="🔬", 
+    page_icon="🧬", # 图标升级为DNA，代表深入核心
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -61,6 +61,7 @@ def send_bark(title, content):
     if not device_key:
         return False, "⚠️ 未配置 bark_device_key"
     
+    # Bark URL 编码处理 (简单处理)
     url = f"{server}/{device_key}/{title}/{content}"
     try:
         res = requests.get(url)
@@ -159,7 +160,7 @@ def page_data_viz():
     st.title("📊 科研数据中心")
     viz_mode = st.radio("选择功能模块:", ["📂 舆情爬虫看板", "🧪 实验室电子记录本 (ELN)"], horizontal=True)
     
-    # === 模块 A: 爬虫看板 (保持不变) ===
+    # === 模块 A: 爬虫看板 (新增：AI 舆情日报) ===
     if viz_mode == "📂 舆情爬虫看板":
         folder = "output_files"
         if not os.path.exists(folder):
@@ -175,8 +176,11 @@ def page_data_viz():
                 df = pd.read_excel(os.path.join(folder, selected))
                 if "标题" in df.columns:
                     st.success(f"✅ 加载 {len(df)} 条舆情数据")
-                    tab1, tab2 = st.tabs(["☁️ 词云图", "📈 频次图"])
+                    
+                    # 🔥 升级：三个 Tab
+                    tab1, tab2, tab3 = st.tabs(["☁️ 词云图", "📈 频次图", "🗞️ AI 舆情日报"])
                     text = " ".join(df["标题"].astype(str).tolist())
+                    
                     with tab1:
                         if st.button("生成词云"):
                             if os.path.exists(FONT_PATH):
@@ -186,23 +190,54 @@ def page_data_viz():
                                 plt.axis('off')
                                 st.pyplot(plt)
                             else: st.error("❌ 缺少字体文件")
+                    
                     with tab2:
                         words = [w for w in text.split() if len(w) > 1]
                         if words:
                             chart_data = pd.DataFrame(Counter(words).most_common(20), columns=["词", "频次"])
                             st.bar_chart(chart_data.set_index("词"))
-                            if st.button("📲 推送热词"):
-                                top_words = ",".join(chart_data["词"].head(3).tolist())
-                                send_bark("今日热词", top_words)
-                                st.success("已推送")
+
+                    # 🔥 新增核心功能：AI 日报
+                    with tab3:
+                        st.markdown("### 🤖 舆情风险智能总结")
+                        st.caption("DeepSeek 将阅读前 50 条新闻标题，为你生成今日简报。")
+                        
+                        if st.button("🚀 生成并推送日报"):
+                            with st.status("AI 正在工作中...", expanded=True) as status:
+                                # 1. 准备数据
+                                status.write("👀 正在读取新闻标题...")
+                                # 取前 50 条，避免 token 超出
+                                news_titles = df["标题"].head(50).tolist()
+                                news_str = "\n".join([f"- {t}" for t in news_titles])
+                                
+                                # 2. AI 思考
+                                status.write("🧠 DeepSeek 正在分析舆论风向...")
+                                prompt = [
+                                    {"role": "system", "content": "你是一个食品安全舆情分析师。请阅读以下新闻标题，总结今日的舆情要点。要求：\n1. 提炼出 3 个核心热点话题。\n2. 分析公众情绪（焦虑/中立/积极）。\n3. 如果有风险事件，请高亮提示。\n4. 输出格式精简，适合手机阅读。"},
+                                    {"role": "user", "content": f"今日新闻列表：\n{news_str}"}
+                                ]
+                                report = get_deepseek_response(prompt)
+                                
+                                status.write("✅ 报告生成完毕！")
+                                status.update(label="任务完成", state="complete", expanded=False)
+                            
+                            # 3. 显示与推送
+                            st.markdown("#### 📄 今日舆情简报")
+                            st.info(report)
+                            
+                            # 推送处理 (Bark URL 长度有限，需截取)
+                            # 提取报告的第一段或前 100 字作为摘要
+                            summary = report[:150].replace("#", "").replace("*", "") + "..."
+                            send_bark("今日舆情日报", summary)
+                            st.toast("日报已推送至手机！", icon="📲")
+
                 else: st.error("❌ 缺少 '标题' 列")
             except Exception as e: st.error(f"读取失败: {e}")
 
-   # === 模块 B: 实验室电子记录本 (ELN) [🔥 AI 诊断版] ===
+    # === 模块 B: 实验室电子记录本 (保持完整，含 AI 诊断) ===
     elif viz_mode == "🧪 实验室电子记录本 (ELN)":
         st.subheader("🧪 智能实验数据中心")
-        st.caption("记录数据，并让 AI 帮你诊断发酵过程中的异常。")
-
+        
         if "lab_data_v2" not in st.session_state:
             st.session_state.lab_data_v2 = pd.DataFrame({
                 "样品编号": ["S-001", "S-002", "S-003"],
@@ -234,9 +269,7 @@ def page_data_viz():
         st.session_state.lab_data_v2 = edited_df
         st.divider()
         
-        # --- 功能操作区 ---
         col1, col2 = st.columns([1, 1])
-        
         with col1:
             st.markdown("### 📈 趋势监控")
             if not edited_df.empty:
@@ -245,40 +278,30 @@ def page_data_viz():
                     plot_df = edited_df.dropna(subset=[plot_col])
                     if not plot_df.empty:
                         st.line_chart(plot_df.set_index("取样时间")[plot_col])
-
         with col2:
             st.markdown("### 🧠 AI 深度诊断")
-            st.caption("DeepSeek 将分析全套数据，寻找潜在问题。")
-            
             if st.button("🚀 开始 AI 诊断"):
-                if edited_df.empty:
-                    st.warning("请先录入数据！")
+                if edited_df.empty: st.warning("请先录入数据！")
                 else:
-                    with st.spinner("AI 正在像导师一样审视你的数据..."):
-                        # 1. 把表格变成字符串，喂给 AI
-                        data_str = edited_df.to_markdown(index=False)
-                        
-                        # 2. 构造专业的 Prompt (强关联食品专业)
+                    with st.spinner("AI 诊断中..."):
+                        # 依赖 tabulate
+                        try:
+                            data_str = edited_df.to_markdown(index=False)
+                        except ImportError:
+                            st.error("❌ 缺少 tabulate 库，请检查 requirements.txt")
+                            st.stop()
+                            
                         prompt = [
-                            {"role": "system", "content": "你是一位资深的食品发酵工程专家。用户会提供一份酸奶/凝胶发酵的实验过程数据。请你：\n1. 分析 pH 值的变化速率是否正常。\n2. 检查温度控制是否稳定。\n3. 指出数据中潜在的异常点或操作失误。\n4. 给出下一步的改进建议。\n请用专业、简练的口吻回答。"},
-                            {"role": "user", "content": f"这是我刚才的实验记录，请帮我诊断一下：\n\n{data_str}"}
+                            {"role": "system", "content": "你是一位食品发酵专家。请分析数据：1.pH变化速率 2.温度稳定性 3.异常点 4.建议。"},
+                            {"role": "user", "content": f"实验记录：\n{data_str}"}
                         ]
-                        
-                        # 3. 调用 AI
                         analysis = get_deepseek_response(prompt)
-                        
-                        # 4. 展示结果
                         st.success("✅ 诊断完成")
-                        st.markdown("#### 📋 专家评估报告")
                         st.info(analysis)
-                        
-                        # 5. 自动推送到手机 (让你在实验室也能收到建议)
-                        # 截取前100字推送到手机
                         short_analysis = analysis[:100].replace("\n", " ") + "..."
                         send_bark("AI实验诊断", short_analysis)
 
             st.divider()
-            # 导出功能 (保留)
             if not edited_df.empty:
                 csv = edited_df.to_csv(index=False).encode('utf-8-sig')
                 st.download_button("📥 备份数据 (Excel)", csv, "lab_data.csv", "text/csv")
@@ -293,7 +316,6 @@ def main():
     st.sidebar.title("🍔 FoodAI 系统")
     
     st.sidebar.markdown("---")
-    # 状态检查
     st.sidebar.caption(f"🔑 DeepSeek: {'✅' if get_config('deepseek_api_key') else '❌'}")
     st.sidebar.caption(f"📡 Bark推送: {'✅' if get_config('bark_device_key') else '❌'}")
 
