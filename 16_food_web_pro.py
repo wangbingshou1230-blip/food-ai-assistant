@@ -217,4 +217,60 @@ def page_data_viz():
             if "标题" in df.columns:
                 st.success(f"✅ 加载 {len(df)} 条数据")
                 
-                tab1, tab2 = st.tabs
+                tab1, tab2 = st.tabs(["☁️ 词云图", "📈 频次图"])
+                text = " ".join(df["标题"].astype(str).tolist())
+                
+                with tab1:
+                    if st.button("生成词云"):
+                        if os.path.exists(FONT_PATH):
+                            wc = WordCloud(font_path=FONT_PATH, width=800, height=400, background_color='white').generate(text)
+                            plt.figure(figsize=(10, 5))
+                            plt.imshow(wc, interpolation='bilinear')
+                            plt.axis('off')
+                            st.pyplot(plt)
+                        else:
+                            st.error("❌ 缺少字体文件 simhei.ttf")
+                
+                with tab2:
+                    words = [w for w in text.split() if len(w) > 1]
+                    if words:
+                        chart_data = pd.DataFrame(Counter(words).most_common(20), columns=["词", "频次"])
+                        st.bar_chart(chart_data.set_index("词"))
+                        
+                        if st.button("📲 推送热词数据"):
+                            top_words = ",".join(chart_data["词"].head(3).tolist())
+                            send_bark("今日热词", top_words)
+                            st.success("已推送")
+            else:
+                st.error("❌ 缺少 '标题' 列")
+        except Exception as e:
+            st.error(f"读取失败: {e}")
+
+# ================= 🚀 7. 主程序 =================
+def main():
+    # 1. 先验证密码 (读取 app_password)
+    if not check_password():
+        return
+
+    # 2. 验证通过后显示主界面
+    if os.path.exists("background.jpg"):
+        st.sidebar.image("background.jpg", use_container_width=True)
+    
+    st.sidebar.title("🍔 FoodAI 系统")
+    
+    # 状态栏
+    st.sidebar.markdown("---")
+    st.sidebar.caption(f"🔑 DeepSeek: {'✅' if get_config('deepseek_api_key') else '❌'}")
+    st.sidebar.caption(f"📡 Bark推送: {'✅' if get_config('bark_device_key') else '❌'}")
+
+    page = st.sidebar.radio("功能导航", ["🤖 智能问答", "📄 文档分析", "📊 舆情数据"])
+
+    if page == "🤖 智能问答":
+        page_chat()
+    elif page == "📄 文档分析":
+        page_doc_analysis()
+    elif page == "📊 舆情数据":
+        page_data_viz()
+
+if __name__ == "__main__":
+    main()
