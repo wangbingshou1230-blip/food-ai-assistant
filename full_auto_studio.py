@@ -50,7 +50,7 @@ def step1_get_news(keyword):
     # 保存数据备用
     if news_data:
         df = pd.DataFrame(news_data, columns=["标题"])
-        df.to_excel(f"{keyword}_素材.xlsx", index=False)
+        df.to_excel(f"output_files/{keyword}_素材.xlsx", index=False)
         print(f"💾 素材已保存到 Excel，共 {len(news_data)} 条。")
         return news_data # 把数据返回给下一步
     else:
@@ -118,7 +118,7 @@ async def step3_make_audio(text):
         print("❌ 没有文案，无法配音！")
         return
 
-    output_file = f"最终成品_{int(time.time())}.mp3" # 加个时间戳防止文件名冲突
+    output_file = f"output_files/最终成品_{int(time.time())}.mp3"# 加个时间戳防止文件名冲突
     
     try:
         communicate = edge_tts.Communicate(text, VOICE)
