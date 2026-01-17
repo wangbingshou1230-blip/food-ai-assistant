@@ -1,111 +1,168 @@
 import streamlit as st
 import pandas as pd
 import os
+import json
+import requests
+import pdfplumber # 用于读取 PDF
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
 
-# ================= ⚙️ 配置中心 =================
-# 设置页面标题和图标
-st.set_page_config(page_title="FoodAI 安全助手", page_icon="🍔", layout="wide")
+# ================= ⚙️ 全局配置 =================
+st.set_page_config(page_title="FoodAI 全能助手", page_icon="🍔", layout="wide")
 
-# 中文字体路径 (Windows 默认黑体)
-# 改成相对路径 (只要字体文件在根目录，这样写就行)
+# 字体路径 (确保 simhei.ttf 在根目录)
 FONT_PATH = "simhei.ttf"
+CONFIG_FILE = "config.json"
 
 # ================= 🧹 工具函数 =================
-def load_excel_files():
-    """扫描 output_files 文件夹，找到所有的 Excel 文件"""
-    folder = "output_files"
-    if not os.path.exists(folder):
-        os.makedirs(folder)
-        return []
-    files = [f for f in os.listdir(folder) if f.endswith(".xlsx")]
-    return files
+
+def get_deepseek_response(messages):
+    """调用 DeepSeek API"""
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            api_key = json.load(f)["deepseek_api_key"]
+            
+        response = requests.post(
+            "https://api.deepseek.com/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"model": "deepseek-chat", "messages": messages}
+        )
+        if response.status_code == 200:
+            return response.json()['choices'][0]['message']['content']
+        else:
+            return f"❌ API 报错: {response.text}"
+    except Exception as e:
+        return f"❌ 调用失败: {e}"
+
+def read_pdf(file):
+    """读取 PDF 文本"""
+    text = ""
+    with pdfplumber.open(file) as pdf:
+        for page in pdf.pages:
+            text += page.extract_text() + "\n"
+    return text
 
 def draw_word_cloud(text_data):
-    """绘制词云图"""
+    """绘制词云"""
     try:
-        # 创建词云对象
         wc = WordCloud(
-            font_path=FONT_PATH,      # 必须指定中文字体！
-            width=800, height=400,    # 图片大小
-            background_color='white', # 背景颜色
-            max_words=100             # 最多显示多少个词
+            font_path=FONT_PATH,
+            width=800, height=400,
+            background_color='white',
+            max_words=100
         ).generate(text_data)
-        
-        # 使用 matplotlib 画图
         plt.figure(figsize=(10, 5))
         plt.imshow(wc, interpolation='bilinear')
-        plt.axis('off') # 关掉坐标轴
+        plt.axis('off')
         return plt
     except Exception as e:
-        st.error(f"生成词云失败，可能是字体路径不对: {e}")
+        st.error(f"❌ 词云生成失败 (可能是字体缺失): {e}")
         return None
 
-# ================= 🏠 页面 1: AI 问答 (原来的功能) =================
+# ================= 🏠 页面 1: AI 智能问答 =================
 def page_chat():
     st.title("🤖 食品安全 AI 专家")
-    st.caption("基于 DeepSeek-V3 · 你的私人科研顾问")
+    st.caption("有问题？尽管问 DeepSeek。")
+
+    # 初始化历史记录
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    # 显示历史消息
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
+
+    # 处理用户输入
+    if prompt := st.chat_input("请输入你的问题..."):
+        # 1. 显示用户问题
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.write(prompt)
+
+        # 2. 调用 AI
+        with st.chat_message("assistant"):
+            with st.spinner("思考中..."):
+                reply = get_deepseek_response(st.session_state.messages)
+                st.write(reply)
+                st.session_state.messages.append({"role": "assistant", "content": reply})
+
+# ================= 📄 页面 2: 文档分析 (RAG) =================
+def page_doc_analysis():
+    st.title("📄 论文/文档分析助手")
+    st.caption("上传 PDF，AI 帮你读。")
+
+    uploaded_file = st.file_uploader("上传 PDF 文档", type=["pdf"])
     
-    # 简单的对话框 (为了代码简洁，这里保留最基础的对话功能)
-    user_input = st.chat_input("请输入你的问题，例如：亚硝酸盐超标怎么办？")
-    if user_input:
-        st.chat_message("user").write(user_input)
-        st.chat_message("assistant").write("AI 正在思考... (这里接入你的 DeepSeek 逻辑)")
+    if uploaded_file:
+        # 1. 提取文本
+        with st.spinner("正在读取文档..."):
+            doc_text = read_pdf(uploaded_file)
+            st.success(f"文档读取成功！共 {len(doc_text)} 字。")
+            
+        # 2. 预览内容
+        with st.expander("👀 查看文档内容预览"):
+            st.text(doc_text[:1000] + "...")
 
-# ================= 📊 页面 2: 舆情分析 (新功能!) =================
-def page_analysis():
+        # 3. 针对文档提问
+        user_q = st.text_input("关于这篇文档，你想问什么？")
+        if user_q and st.button("🚀 提问"):
+            with st.spinner("AI 正在分析..."):
+                # 构造 Prompt
+                messages = [
+                    {"role": "system", "content": "你是一个学术助手。请基于以下文档内容回答用户问题。"},
+                    {"role": "user", "content": f"文档内容：\n{doc_text[:3000]}...\n\n用户问题：{user_q}"}
+                ]
+                answer = get_deepseek_response(messages)
+                st.write("### 💡 AI 回答：")
+                st.write(answer)
+
+# ================= 📊 页面 3: 舆情词云 (新功能) =================
+def page_data_viz():
     st.title("📊 舆情热词分析")
-    st.markdown("---")
+    st.caption("可视化你的爬虫数据。")
 
-    # 1. 侧边栏：选择数据源
-    files = load_excel_files()
-    if not files:
-        st.warning("⚠️ output_files 文件夹里没有 Excel 文件！请先去运行 full_auto_studio.py 抓点新闻回来。")
+    folder = "output_files"
+    if not os.path.exists(folder):
+        st.warning("⚠️ 没找到 output_files 文件夹，请先运行本地爬虫脚本。")
         return
 
-    selected_file = st.selectbox("📂 选择要分析的爬虫数据:", files)
+    files = [f for f in os.listdir(folder) if f.endswith(".xlsx")]
+    
+    if not files:
+        st.info("📂 output_files 文件夹里没有 Excel 文件。")
+        return
 
-    if selected_file:
-        file_path = os.path.join("output_files", selected_file)
+    selected = st.selectbox("选择数据文件:", files)
+    if selected:
+        path = os.path.join(folder, selected)
+        df = pd.read_excel(path)
         
-        # 2. 读取数据
-        try:
-            df = pd.read_excel(file_path)
-            st.success(f"✅ 成功读取文件：{selected_file}，共 {len(df)} 条数据")
-            
-            # 显示前 5 行给用户看看
-            with st.expander("👀 查看原始数据 (前5条)"):
-                st.dataframe(df.head())
+        if "标题" in df.columns:
+            text = " ".join(df["标题"].astype(str).tolist())
+            if st.button("🎨 生成词云"):
+                fig = draw_word_cloud(text)
+                if fig: st.pyplot(fig)
+        else:
+            st.error("❌ Excel 中找不到 '标题' 列。")
 
-            # 3. 数据处理：把所有标题拼成一个大字符串
-            # 假设 Excel 里有一列叫 "标题" (我们在爬虫脚本里定义的)
-            if "标题" in df.columns:
-                all_text = " ".join(df["标题"].astype(str).tolist())
-                
-                # 4. 按钮：点击生成词云
-                if st.button("🎨 生成词云图"):
-                    st.markdown("### 🔥 热点词云")
-                    fig = draw_word_cloud(all_text)
-                    if fig:
-                        st.pyplot(fig) # 把图显示在网页上
-            else:
-                st.error("❌ 这个 Excel 里找不到 '标题' 这一列！请检查文件格式。")
-
-        except Exception as e:
-            st.error(f"读取文件出错: {e}")
-
-# ================= 🚀 主程序入口 =================
+# ================= 🔗 导航栏逻辑 =================
 def main():
-    # 侧边栏导航
-    st.sidebar.image("background.jpg", caption="FoodAI Lab", use_container_width=True)
-    st.sidebar.title("导航")
-    page = st.sidebar.radio("去哪里？", ["🤖 AI 问答", "📊 舆情分析"])
+    st.sidebar.image("background.jpg", use_container_width=True)
+    st.sidebar.title("🍔 FoodAI 导航")
+    
+    # 侧边栏菜单
+    page = st.sidebar.radio(
+        "功能选择", 
+        ["🤖 AI 智能问答", "📄 文档分析助手", "📊 舆情热词分析"]
+    )
 
-    if page == "🤖 AI 问答":
+    if page == "🤖 AI 智能问答":
         page_chat()
-    elif page == "📊 舆情分析":
-        page_analysis()
+    elif page == "📄 文档分析助手":
+        page_doc_analysis()
+    elif page == "📊 舆情热词分析":
+        page_data_viz()
 
 if __name__ == "__main__":
     main()
