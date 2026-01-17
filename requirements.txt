@@ -5,5 +5,4 @@ beautifulsoup4
 matplotlib
 PyPDF2
 openpyxl
-wordcloud
-matplotlib
+pdfplumber
