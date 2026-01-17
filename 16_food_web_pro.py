@@ -3,28 +3,50 @@ import pandas as pd
 import os
 import json
 import requests
-import pdfplumber  # 用于读取 PDF
+import pdfplumber
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
+from collections import Counter # 用于统计词频
 
-# ================= ⚙️ 1. 全局配置 =================
+# ================= ⚙️ 1. 全局配置与字体 =================
 st.set_page_config(
-    page_title="FoodAI 全能助手", 
-    page_icon="🍔", 
-    layout="wide"
+    page_title="FoodAI 全能工作台", 
+    page_icon="🛡️", 
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# 字体配置：适配云端 (根目录) 和 本地 (C盘)
-# 优先使用根目录下的 simhei.ttf (为了云端词云不乱码)
-FONT_PATH = "simhei.ttf" 
+# 字体路径 (适配云端和本地)
+FONT_PATH = "simhei.ttf"
 
-# ================= 🔐 2. 核心工具：智能密钥获取 =================
+# ================= 🔐 2. 安全门神：密码登录系统 =================
+def check_password():
+    """返回 True 如果密码正确，否则返回 False"""
+    
+    # 如果已经登录成功，直接放行
+    if st.session_state.get("password_correct", False):
+        return True
+
+    # 显示登录框
+    st.header("🔒 FoodAI 内部系统登录")
+    password = st.text_input("请输入访问密码", type="password")
+    
+    if st.button("登录"):
+        # 优先从 Secrets 读取密码，如果没有配置，默认密码是 123456
+        # 你可以在 Streamlit Secrets 里配置 [passwords] main = "你的密码"
+        correct_password = st.secrets.get("passwords", {}).get("main", "123456")
+        
+        if password == correct_password:
+            st.session_state["password_correct"] = True
+            st.rerun() # 刷新页面进入系统
+        else:
+            st.error("❌ 密码错误")
+            
+    return False
+
+# ================= 🔑 3. 核心工具：双重密钥获取 =================
 def get_api_key():
-    """
-    双重保险：
-    1. 优先去 Streamlit Cloud 的 Secrets 里找 (云端模式)
-    2. 找不到再去本地 config.json 里找 (本地开发模式)
-    """
+    """双重保险：优先云端 Secrets，其次本地 config.json"""
     # A. 云端模式
     if "deepseek_api_key" in st.secrets:
         return st.secrets["deepseek_api_key"]
@@ -36,189 +58,160 @@ def get_api_key():
                 return json.load(f).get("deepseek_api_key")
     except Exception:
         pass
-    
     return None
 
 def get_deepseek_response(messages):
-    """调用 DeepSeek API 的通用函数"""
+    """调用 DeepSeek API"""
     api_key = get_api_key()
-    
     if not api_key:
-        return "❌ 严重错误：未找到 API Key！请在 Streamlit Secrets 或本地 config.json 中配置。"
+        return "❌ 未找到 API Key！请配置 Secrets 或 config.json。"
 
     try:
         response = requests.post(
             "https://api.deepseek.com/chat/completions",
             headers={"Authorization": f"Bearer {api_key}"},
-            json={
-                "model": "deepseek-chat", 
-                "messages": messages,
-                "stream": False
-            }
+            json={"model": "deepseek-chat", "messages": messages, "stream": False}
         )
         if response.status_code == 200:
             return response.json()['choices'][0]['message']['content']
         else:
-            return f"❌ API 返回报错: {response.text}"
+            return f"❌ API 报错: {response.text}"
     except Exception as e:
-        return f"❌ 网络请求失败: {e}"
+        return f"❌ 请求失败: {e}"
 
-# ================= 🤖 3. 功能模块 A：智能问答 =================
+# ================= 🤖 4. 模块 A：AI 智能问答 =================
 def page_chat():
     st.title("🤖 食品安全 AI 专家")
     st.caption("基于 DeepSeek-V3 · 你的私人科研顾问")
 
-    # 初始化历史记录 (这是上下文记忆的关键)
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # 1. 渲染历史消息
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
-    # 2. 处理新输入
-    if prompt := st.chat_input("请输入你的问题，例如：亚硝酸盐超标怎么办？"):
-        # 显示用户问题
+    if prompt := st.chat_input("请输入问题..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.write(prompt)
 
-        # 调用 AI
         with st.chat_message("assistant"):
-            with st.spinner("DeepSeek 正在思考..."):
+            with st.spinner("AI 思考中..."):
                 reply = get_deepseek_response(st.session_state.messages)
                 st.write(reply)
-                # 记录 AI 回答
                 st.session_state.messages.append({"role": "assistant", "content": reply})
 
-# ================= 📄 4. 功能模块 B：文档分析 (RAG) =================
-def read_pdf(file):
-    """使用 pdfplumber 提取文本"""
-    text = ""
-    try:
-        with pdfplumber.open(file) as pdf:
-            for page in pdf.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
-    except Exception as e:
-        st.error(f"解析 PDF 失败: {e}")
-    return text
-
+# ================= 📄 5. 模块 B：文档深度分析 (RAG) =================
 def page_doc_analysis():
-    st.title("📄 论文/文档深度分析")
-    st.caption("上传 PDF，让 AI 帮你读文献、写综述。")
-
-    uploaded_file = st.file_uploader("📂 请上传 PDF 文档", type=["pdf"])
+    st.title("📄 文献/文档智能分析")
+    uploaded_file = st.file_uploader("上传 PDF 文档", type=["pdf"])
     
     if uploaded_file:
-        # 1. 读取内容
-        with st.spinner("正在提取文本..."):
-            doc_text = read_pdf(uploaded_file)
-        
-        if len(doc_text) > 10:
-            st.success(f"✅ 读取成功！文档长度: {len(doc_text)} 字")
-            
-            # 2. 预览 (只看前 800 字)
-            with st.expander("👀 点击查看文档开头内容"):
-                st.text(doc_text[:800] + "......")
+        text = ""
+        with st.spinner("正在解析 PDF..."):
+            try:
+                with pdfplumber.open(uploaded_file) as pdf:
+                    for page in pdf.pages:
+                        text += page.extract_text() + "\n"
+                st.success(f"✅ 解析成功，共 {len(text)} 字")
+                
+                with st.expander("👀 查看文档预览"):
+                    st.text(text[:1000] + "...")
+                    
+                user_q = st.text_input("针对此文档提问：")
+                if user_q and st.button("分析"):
+                    with st.spinner("AI 正在阅读..."):
+                        # 防止 token 超出，截取前 1.5万字
+                        context = text[:15000]
+                        messages = [
+                            {"role": "system", "content": "你是一个学术助手。必须基于以下文档内容回答问题。"},
+                            {"role": "user", "content": f"文档内容：\n{context}\n\n问题：{user_q}"}
+                        ]
+                        answer = get_deepseek_response(messages)
+                        st.markdown("### 💡 分析结果")
+                        st.write(answer)
+            except Exception as e:
+                st.error(f"PDF 解析失败: {e}")
 
-            # 3. 提问区
-            user_q = st.text_input("👇 关于这篇文档，你想问什么？", placeholder="例如：这篇文章的核心结论是什么？")
-            
-            if user_q and st.button("🚀 提交问题"):
-                with st.spinner("AI 正在阅读并分析..."):
-                    # 构造 RAG Prompt
-                    # 注意：如果文档太长，截取前 10000 字防止超长
-                    context = doc_text[:10000] 
-                    messages = [
-                        {"role": "system", "content": "你是一个专业的学术助手。请务必基于下方的【文档内容】来回答用户的问题。如果文档里没有提到，请直接说不知道。"},
-                        {"role": "user", "content": f"【文档内容】：\n{context}\n\n【用户问题】：{user_q}"}
-                    ]
-                    answer = get_deepseek_response(messages)
-                    st.markdown("### 💡 分析结果")
-                    st.write(answer)
-        else:
-            st.warning("⚠️ 文档内容为空或无法识别，请检查 PDF 是否为扫描件。")
-
-# ================= 📊 5. 功能模块 C：舆情词云 =================
-def draw_word_cloud(text_data):
-    """生成词云图"""
-    if not os.path.exists(FONT_PATH):
-        st.error(f"❌ 严重错误：在根目录下找不到字体文件 {FONT_PATH}！请务必上传。")
-        return None
-
-    try:
-        wc = WordCloud(
-            font_path=FONT_PATH,      # 必须指定中文字体
-            width=800, height=400,
-            background_color='white',
-            max_words=80
-        ).generate(text_data)
-        
-        plt.figure(figsize=(10, 5))
-        plt.imshow(wc, interpolation='bilinear')
-        plt.axis('off')
-        return plt
-    except Exception as e:
-        st.error(f"生成词云失败: {e}")
-        return None
-
+# ================= 📊 6. 模块 C：数据分析 (词云 + 图表) =================
 def page_data_viz():
-    st.title("📊 舆情热词可视化")
+    st.title("📊 舆情与数据分析看板")
     
     folder = "output_files"
     if not os.path.exists(folder):
-        st.warning("⚠️ 暂无数据。请先运行本地爬虫脚本抓取新闻。")
+        st.warning("⚠️ 本地没有 output_files 文件夹，请先运行爬虫脚本。")
         return
 
-    # 找 Excel 文件
     files = [f for f in os.listdir(folder) if f.endswith(".xlsx")]
-    
     if not files:
-        st.info("📂 output_files 文件夹是空的，快去抓点新闻吧！")
+        st.info("📂 暂无数据文件。")
         return
 
-    # 选择文件
-    selected_file = st.selectbox("📂 选择要分析的数据源:", files)
+    selected_file = st.selectbox("📂 选择数据源:", files)
     
     if selected_file:
         file_path = os.path.join(folder, selected_file)
         try:
             df = pd.read_excel(file_path)
-            if "标题" in df.columns:
-                st.success(f"✅ 加载数据: {len(df)} 条")
+            if "标题" not in df.columns:
+                st.error("❌ 数据格式错误：缺少 '标题' 列")
+                return
                 
-                if st.button("🎨 生成今日热点词云"):
-                    # 拼接所有标题
-                    text = " ".join(df["标题"].astype(str).tolist())
-                    fig = draw_word_cloud(text)
-                    if fig:
-                        st.pyplot(fig)
-            else:
-                st.error("❌ Excel 格式错误：找不到 '标题' 这一列。")
-        except Exception as e:
-            st.error(f"读取文件失败: {e}")
+            st.success(f"✅ 加载 {len(df)} 条数据")
+            
+            # --- 核心修复：数据分析不只是词云 ---
+            tab1, tab2 = st.tabs(["☁️ 词云视图", "📈 频次统计"])
+            
+            # 准备文本数据
+            all_text = " ".join(df["标题"].astype(str).tolist())
+            
+            with tab1:
+                if st.button("生成词云"):
+                    if not os.path.exists(FONT_PATH):
+                        st.error("❌ 缺少 simhei.ttf 字体文件")
+                    else:
+                        wc = WordCloud(font_path=FONT_PATH, width=800, height=400, background_color='white').generate(all_text)
+                        plt.figure(figsize=(10, 5))
+                        plt.imshow(wc, interpolation='bilinear')
+                        plt.axis('off')
+                        st.pyplot(plt)
+            
+            with tab2:
+                # 简单的分词逻辑（按空格分割，实际中文分词通常用 jieba，但这里为了环境简单，假设标题里有空格或直接统计字/词）
+                # 这里做一个简单的 Top 20 词频统计（按空格切分模拟，如果标题是整句，这里统计的可能不准，但演示了图表功能）
+                st.caption("这里展示标题中出现频率最高的关键词（示例算法）")
+                # 为了让图表有内容，我们简单按字/词切分
+                words = [w for w in all_text.split() if len(w) > 1] 
+                if words:
+                    count_data = pd.DataFrame(Counter(words).most_common(20), columns=["词语", "频次"])
+                    st.bar_chart(count_data.set_index("词语"))
+                else:
+                    st.warning("数据太少，无法生成统计图。")
 
-# ================= 🔗 6. 主程序导航 =================
+        except Exception as e:
+            st.error(f"读取失败: {e}")
+
+# ================= 🚀 7. 主程序入口 =================
 def main():
-    # 侧边栏图片 (防止报错，先检查是否存在)
+    # 🛑 只有密码验证通过，才显示下面的内容
+    if not check_password():
+        return  # 如果没登录，直接结束，不渲染侧边栏和功能区
+
+    # 登录成功后显示的内容
     if os.path.exists("background.jpg"):
         st.sidebar.image("background.jpg", use_container_width=True)
     
-    st.sidebar.title("🍔 FoodAI 导航")
+    st.sidebar.title("🍔 FoodAI 系统")
+    st.sidebar.success("✅ 已安全登录")
     
-    page = st.sidebar.radio(
-        "请选择功能模块:", 
-        ["🤖 AI 智能问答", "📄 文档分析助手", "📊 舆情热词分析"]
-    )
-
-    if page == "🤖 AI 智能问答":
+    page = st.sidebar.radio("功能导航", ["🤖 智能问答", "📄 文档分析", "📊 数据看板"])
+    
+    if page == "🤖 智能问答":
         page_chat()
-    elif page == "📄 文档分析助手":
+    elif page == "📄 文档分析":
         page_doc_analysis()
-    elif page == "📊 舆情热词分析":
+    elif page == "📊 数据看板":
         page_data_viz()
 
 if __name__ == "__main__":
