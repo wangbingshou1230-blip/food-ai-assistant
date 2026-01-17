@@ -7,48 +7,33 @@ import pdfplumber
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
 from collections import Counter
+from datetime import datetime # 用于记录时间
 
 # ================= ⚙️ 1. 全局配置 =================
 st.set_page_config(
     page_title="FoodAI 全能工作台", 
-    page_icon="📡", 
+    page_icon="🔬", 
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# 字体路径 (适配云端和本地)
 FONT_PATH = "simhei.ttf"
 
-# ================= 🔐 2. 核心：适配你的 Secrets 配置 =================
+# ================= 🔐 2. 核心：精准适配 Secrets =================
 def get_config(key_name):
-    """
-    精准读取你的配置：
-    1. 优先读取 Streamlit Secrets (云端)
-    2. 其次读取本地 config.json (本地)
-    """
-    # A. 云端模式 (匹配你截图中的变量名)
     if key_name in st.secrets:
         return st.secrets[key_name]
-    
-    # B. 本地模式
     try:
         if os.path.exists("config.json"):
             with open("config.json", "r", encoding="utf-8") as f:
                 config = json.load(f)
-                # 本地 config.json 的键名可能不同，这里做个兼容映射
-                mapping = {
-                    "deepseek_api_key": "deepseek_api_key",
-                    "bark_device_key": "bark_key", # 假设本地json里叫bark_key
-                    "app_password": "password"     # 假设本地json里叫password
-                }
-                return config.get(mapping.get(key_name, key_name))
+                return config.get(key_name)
     except:
         pass
     return None
 
-# ================= 🛡️ 3. 安全门禁 (适配 app_password) =================
+# ================= 🛡️ 3. 安全门禁 =================
 def check_password():
-    """密码验证，对接你的 'app_password'"""
     if st.session_state.get("password_correct", False):
         return True
 
@@ -56,12 +41,8 @@ def check_password():
     password = st.text_input("请输入访问密码", type="password")
     
     if st.button("登录"):
-        # 🔥 关键修正：直接读取你 Secrets 里的 'app_password'
         correct_password = get_config("app_password")
-        
-        # 如果没配置，兜底用 123456，防止死锁
-        if not correct_password:
-            correct_password = "123456" 
+        if not correct_password: correct_password = "123456" 
             
         if password == correct_password:
             st.session_state["password_correct"] = True
@@ -70,43 +51,28 @@ def check_password():
             st.error("❌ 密码错误")
     return False
 
-# ================= 📡 4. Bark 推送 (适配 bark_device_key) =================
+# ================= 📡 4. Bark 推送 =================
 def send_bark(title, content):
-    """
-    发送 Bark 通知
-    🔥 关键修正：读取 'bark_device_key' 和 'bark_server'
-    """
     device_key = get_config("bark_device_key")
     server = get_config("bark_server")
-    
-    # 如果没配置 server，默认用官方的
-    if not server: 
-        server = "https://api.day.app"
-    
-    # 去掉 server 结尾可能的 /
+    if not server: server = "https://api.day.app"
     server = server.rstrip("/")
 
     if not device_key:
-        return False, "⚠️ 未检测到 bark_device_key，无法推送"
+        return False, "⚠️ 未配置 bark_device_key"
     
-    # 构造 URL: https://api.day.app/你的Key/标题/内容
     url = f"{server}/{device_key}/{title}/{content}"
-    
     try:
         res = requests.get(url)
-        if res.status_code == 200:
-            return True, "✅ 推送成功"
-        else:
-            return False, f"❌ 推送失败: {res.text}"
+        if res.status_code == 200: return True, "✅ 推送成功"
+        else: return False, f"❌ 推送失败: {res.text}"
     except Exception as e:
         return False, f"❌ 网络错误: {e}"
 
-# ================= 🧠 5. AI 引擎 (适配 deepseek_api_key) =================
+# ================= 🧠 5. AI 引擎 =================
 def get_deepseek_response(messages):
     api_key = get_config("deepseek_api_key")
-    
-    if not api_key:
-        return "❌ 错误：未找到 deepseek_api_key，请检查 Secrets。"
+    if not api_key: return "❌ 错误：未找到 deepseek_api_key"
 
     try:
         response = requests.post(
@@ -125,21 +91,17 @@ def get_deepseek_response(messages):
 
 def page_chat():
     st.title("🤖 智能问答")
-    st.caption("支持 DeepSeek 对话 & Bark 远程推送")
+    st.caption("DeepSeek-V3 + Bark 远程通知")
 
-    # --- Bark 测试区 ---
-    with st.expander("📡 测试手机推送"):
+    with st.expander("📡 测试手机通知"):
         col1, col2 = st.columns([3, 1])
         with col1:
             test_msg = st.text_input("输入测试内容", value="系统连接正常")
         with col2:
             if st.button("🚀 发送"):
                 success, msg = send_bark("FoodAI测试", test_msg)
-                if success:
-                    st.toast(msg, icon="✅")
-                else:
-                    st.error(msg)
-    # -------------------
+                if success: st.toast(msg, icon="✅")
+                else: st.error(msg)
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -159,9 +121,8 @@ def page_chat():
                 st.write(reply)
                 st.session_state.messages.append({"role": "assistant", "content": reply})
                 
-                # 长文本推送按钮
-                if len(reply) > 100:
-                    if st.button("📲 推送回答摘要到手机"):
+                if len(reply) > 50:
+                    if st.button("📲 推送摘要到手机"):
                         send_bark("AI回答", reply[:100] + "...")
                         st.success("已推送")
 
@@ -177,7 +138,6 @@ def page_doc_analysis():
                     for page in pdf.pages:
                         page_text = page.extract_text()
                         if page_text: text += page_text + "\n"
-                
                 st.success(f"✅ 解析成功，共 {len(text)} 字")
                 
                 user_q = st.text_input("关于文档你想问什么？")
@@ -191,86 +151,159 @@ def page_doc_analysis():
                         answer = get_deepseek_response(messages)
                         st.markdown("### 💡 分析结果")
                         st.write(answer)
-                        
-                        # 自动推送结果
-                        send_bark("文档分析完成", f"关于{user_q}的分析已完成。")
+                        send_bark("文档分析完成", f"关于{user_q}的回答已生成")
             except Exception as e:
                 st.error(f"解析失败: {e}")
 
 def page_data_viz():
-    st.title("📊 舆情数据看板")
+    st.title("📊 科研数据中心")
+    viz_mode = st.radio("选择功能模块:", ["📂 舆情爬虫看板", "🧪 实验室电子记录本 (ELN)"], horizontal=True)
     
-    folder = "output_files"
-    if not os.path.exists(folder):
-        st.warning("⚠️ output_files 文件夹不存在")
-        return
+    # === 模块 A: 爬虫看板 (保持不变) ===
+    if viz_mode == "📂 舆情爬虫看板":
+        folder = "output_files"
+        if not os.path.exists(folder):
+            st.warning("⚠️ output_files 文件夹不存在")
+            return
+        files = [f for f in os.listdir(folder) if f.endswith(".xlsx")]
+        if not files:
+            st.info("📂 暂无 Excel 文件")
+            return
+        selected = st.selectbox("选择爬虫数据:", files)
+        if selected:
+            try:
+                df = pd.read_excel(os.path.join(folder, selected))
+                if "标题" in df.columns:
+                    st.success(f"✅ 加载 {len(df)} 条舆情数据")
+                    tab1, tab2 = st.tabs(["☁️ 词云图", "📈 频次图"])
+                    text = " ".join(df["标题"].astype(str).tolist())
+                    with tab1:
+                        if st.button("生成词云"):
+                            if os.path.exists(FONT_PATH):
+                                wc = WordCloud(font_path=FONT_PATH, width=800, height=400, background_color='white').generate(text)
+                                plt.figure(figsize=(10, 5))
+                                plt.imshow(wc, interpolation='bilinear')
+                                plt.axis('off')
+                                st.pyplot(plt)
+                            else: st.error("❌ 缺少字体文件")
+                    with tab2:
+                        words = [w for w in text.split() if len(w) > 1]
+                        if words:
+                            chart_data = pd.DataFrame(Counter(words).most_common(20), columns=["词", "频次"])
+                            st.bar_chart(chart_data.set_index("词"))
+                            if st.button("📲 推送热词"):
+                                top_words = ",".join(chart_data["词"].head(3).tolist())
+                                send_bark("今日热词", top_words)
+                                st.success("已推送")
+                else: st.error("❌ 缺少 '标题' 列")
+            except Exception as e: st.error(f"读取失败: {e}")
 
-    files = [f for f in os.listdir(folder) if f.endswith(".xlsx")]
-    if not files:
-        st.info("📂 暂无数据文件")
-        return
+    # === 模块 B: 实验室电子记录本 (ELN) [🔥重大升级🔥] ===
+    elif viz_mode == "🧪 实验室电子记录本 (ELN)":
+        st.subheader("🧪 多维实验数据记录")
+        st.caption("专为食品科研设计：记录pH、温度、粒径等关键参数，并支持导出。")
 
-    selected = st.selectbox("选择数据源:", files)
-    if selected:
-        try:
-            df = pd.read_excel(os.path.join(folder, selected))
-            if "标题" in df.columns:
-                st.success(f"✅ 加载 {len(df)} 条数据")
-                
-                tab1, tab2 = st.tabs(["☁️ 词云图", "📈 频次图"])
-                text = " ".join(df["标题"].astype(str).tolist())
-                
-                with tab1:
-                    if st.button("生成词云"):
-                        if os.path.exists(FONT_PATH):
-                            wc = WordCloud(font_path=FONT_PATH, width=800, height=400, background_color='white').generate(text)
-                            plt.figure(figsize=(10, 5))
-                            plt.imshow(wc, interpolation='bilinear')
-                            plt.axis('off')
-                            st.pyplot(plt)
-                        else:
-                            st.error("❌ 缺少字体文件 simhei.ttf")
-                
-                with tab2:
-                    words = [w for w in text.split() if len(w) > 1]
-                    if words:
-                        chart_data = pd.DataFrame(Counter(words).most_common(20), columns=["词", "频次"])
-                        st.bar_chart(chart_data.set_index("词"))
-                        
-                        if st.button("📲 推送热词数据"):
-                            top_words = ",".join(chart_data["词"].head(3).tolist())
-                            send_bark("今日热词", top_words)
-                            st.success("已推送")
+        # 1. 初始化多维模板 (如果还没创建)
+        if "lab_data_v2" not in st.session_state:
+            # 创建一个更专业的初始模板
+            st.session_state.lab_data_v2 = pd.DataFrame({
+                "样品编号": ["S-001", "S-002"],
+                "取样时间": [datetime.now().strftime("%H:%M"), datetime.now().strftime("%H:%M")],
+                "pH值": [6.80, 4.60],
+                "温度(°C)": [25.5, 42.0],
+                "转速(rpm)": [1000, 0],
+                "平均粒径(nm)": [None, 250.5], # None 表示空值
+                "外观描述": ["乳状液初形成", "凝胶形成，质地均匀"],
+            })
+
+        # 2. 专业版可编辑表格
+        # 配置每一列的数据类型和格式
+        column_config = {
+            "样品编号": st.column_config.TextColumn("🆔 样品编号", required=True),
+            "取样时间": st.column_config.TextColumn("⏰ 取样时间"),
+            "pH值": st.column_config.NumberColumn("🧪 pH值", min_value=0.0, max_value=14.0, format="%.2f"),
+            "温度(°C)": st.column_config.NumberColumn("🌡️ 温度(°C)", format="%.1f"),
+            "转速(rpm)": st.column_config.NumberColumn("🔄 转速(rpm)", step=100),
+            "平均粒径(nm)": st.column_config.NumberColumn("📏 平均粒径(nm)", format="%.1f"),
+            "外观描述": st.column_config.TextColumn("📝 外观/备注", width="large"),
+        }
+        
+        edited_df = st.data_editor(
+            st.session_state.lab_data_v2,
+            num_rows="dynamic", # 允许增删行
+            column_config=column_config,
+            use_container_width=True,
+            key="editor_v2" # 给个新 key 避免冲突
+        )
+        
+        # 实时保存
+        st.session_state.lab_data_v2 = edited_df
+
+        st.divider()
+        
+        # 3. 功能操作区
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.markdown("### 📈 趋势分析")
+            if not edited_df.empty:
+                # 让用户选择画什么数据的图
+                plot_col = st.selectbox("选择要分析的参数趋势:", ["pH值", "温度(°C)", "平均粒径(nm)"])
+                # 只画数值类型的列
+                if plot_col in edited_df.columns:
+                    # 处理一下空值，避免画图报错
+                    plot_df = edited_df.dropna(subset=[plot_col])
+                    if not plot_df.empty:
+                        st.line_chart(plot_df.set_index("样品编号")[plot_col])
+                    else:
+                        st.info(f"没有关于 {plot_col} 的有效数据。")
             else:
-                st.error("❌ 缺少 '标题' 列")
-        except Exception as e:
-            st.error(f"读取失败: {e}")
+                st.info("请先在上方表格录入数据。")
+
+        with col2:
+            st.markdown("### 💾 数据归档")
+            if not edited_df.empty:
+                # 🔥 杀手级功能：导出 CSV
+                # 将 DataFrame 转为 CSV 字符串
+                csv_data = edited_df.to_csv(index=False).encode('utf-8-sig') # utf-8-sig 解决 Excel 打开中文乱码
+                
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+                st.download_button(
+                    label="📥 导出为 Excel (CSV)",
+                    data=csv_data,
+                    file_name=f"实验记录_{timestamp}.csv",
+                    mime="text/csv",
+                    type="primary" # 醒目的按钮
+                )
+                st.caption("导出后可直接用 Excel 打开用于论文作图。")
+                
+                st.divider()
+                # 简易报警
+                current_ph = edited_df["pH值"].iloc[-1] if not edited_df["pH值"].isna().all() else None
+                if current_ph and (current_ph < 4.0 or current_ph > 7.0):
+                     if st.button("🚨 发送 pH 异常报警"):
+                         send_bark("实验室报警", f"最新样品 pH={current_ph:.2f}，超出正常范围！")
+                         st.error("已触发远程报警！")
 
 # ================= 🚀 7. 主程序 =================
 def main():
-    # 1. 先验证密码 (读取 app_password)
-    if not check_password():
-        return
+    if not check_password(): return
 
-    # 2. 验证通过后显示主界面
     if os.path.exists("background.jpg"):
         st.sidebar.image("background.jpg", use_container_width=True)
     
     st.sidebar.title("🍔 FoodAI 系统")
     
-    # 状态栏
     st.sidebar.markdown("---")
+    # 状态检查
     st.sidebar.caption(f"🔑 DeepSeek: {'✅' if get_config('deepseek_api_key') else '❌'}")
     st.sidebar.caption(f"📡 Bark推送: {'✅' if get_config('bark_device_key') else '❌'}")
 
-    page = st.sidebar.radio("功能导航", ["🤖 智能问答", "📄 文档分析", "📊 舆情数据"])
+    page = st.sidebar.radio("功能导航", ["🤖 智能问答", "📄 文档分析", "📊 科研数据中心"])
 
-    if page == "🤖 智能问答":
-        page_chat()
-    elif page == "📄 文档分析":
-        page_doc_analysis()
-    elif page == "📊 舆情数据":
-        page_data_viz()
+    if page == "🤖 智能问答": page_chat()
+    elif page == "📄 文档分析": page_doc_analysis()
+    elif page == "📊 科研数据中心": page_data_viz()
 
 if __name__ == "__main__":
     main()
