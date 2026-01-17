@@ -9,7 +9,8 @@ import matplotlib.pyplot as plt
 st.set_page_config(page_title="FoodAI 安全助手", page_icon="🍔", layout="wide")
 
 # 中文字体路径 (Windows 默认黑体)
-FONT_PATH = "C:\\Windows\\Fonts\\simhei.ttf"
+# 改成相对路径 (只要字体文件在根目录，这样写就行)
+FONT_PATH = "simhei.ttf"
 
 # ================= 🧹 工具函数 =================
 def load_excel_files():
