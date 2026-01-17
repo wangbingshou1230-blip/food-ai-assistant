@@ -198,92 +198,90 @@ def page_data_viz():
                 else: st.error("❌ 缺少 '标题' 列")
             except Exception as e: st.error(f"读取失败: {e}")
 
-    # === 模块 B: 实验室电子记录本 (ELN) [🔥重大升级🔥] ===
+   # === 模块 B: 实验室电子记录本 (ELN) [🔥 AI 诊断版] ===
     elif viz_mode == "🧪 实验室电子记录本 (ELN)":
-        st.subheader("🧪 多维实验数据记录")
-        st.caption("专为食品科研设计：记录pH、温度、粒径等关键参数，并支持导出。")
+        st.subheader("🧪 智能实验数据中心")
+        st.caption("记录数据，并让 AI 帮你诊断发酵过程中的异常。")
 
-        # 1. 初始化多维模板 (如果还没创建)
         if "lab_data_v2" not in st.session_state:
-            # 创建一个更专业的初始模板
             st.session_state.lab_data_v2 = pd.DataFrame({
-                "样品编号": ["S-001", "S-002"],
-                "取样时间": [datetime.now().strftime("%H:%M"), datetime.now().strftime("%H:%M")],
-                "pH值": [6.80, 4.60],
-                "温度(°C)": [25.5, 42.0],
-                "转速(rpm)": [1000, 0],
-                "平均粒径(nm)": [None, 250.5], # None 表示空值
-                "外观描述": ["乳状液初形成", "凝胶形成，质地均匀"],
+                "样品编号": ["S-001", "S-002", "S-003"],
+                "取样时间": ["08:00", "10:00", "12:00"],
+                "pH值": [6.80, 5.50, 4.60],
+                "温度(°C)": [42.0, 42.5, 43.0],
+                "转速(rpm)": [1000, 1000, 0],
+                "平均粒径(nm)": [None, 250.5, 260.0],
+                "外观描述": ["乳状液初形成", "开始变稠", "凝胶形成良好"],
             })
 
-        # 2. 专业版可编辑表格
-        # 配置每一列的数据类型和格式
         column_config = {
             "样品编号": st.column_config.TextColumn("🆔 样品编号", required=True),
             "取样时间": st.column_config.TextColumn("⏰ 取样时间"),
-            "pH值": st.column_config.NumberColumn("🧪 pH值", min_value=0.0, max_value=14.0, format="%.2f"),
+            "pH值": st.column_config.NumberColumn("🧪 pH值", format="%.2f"),
             "温度(°C)": st.column_config.NumberColumn("🌡️ 温度(°C)", format="%.1f"),
-            "转速(rpm)": st.column_config.NumberColumn("🔄 转速(rpm)", step=100),
-            "平均粒径(nm)": st.column_config.NumberColumn("📏 平均粒径(nm)", format="%.1f"),
-            "外观描述": st.column_config.TextColumn("📝 外观/备注", width="large"),
+            "转速(rpm)": st.column_config.NumberColumn("🔄 转速(rpm)"),
+            "平均粒径(nm)": st.column_config.NumberColumn("📏 粒径(nm)"),
+            "外观描述": st.column_config.TextColumn("📝 备注", width="large"),
         }
         
         edited_df = st.data_editor(
             st.session_state.lab_data_v2,
-            num_rows="dynamic", # 允许增删行
+            num_rows="dynamic",
             column_config=column_config,
             use_container_width=True,
-            key="editor_v2" # 给个新 key 避免冲突
+            key="editor_v2"
         )
-        
-        # 实时保存
         st.session_state.lab_data_v2 = edited_df
-
         st.divider()
         
-        # 3. 功能操作区
-        col1, col2 = st.columns([2, 1])
+        # --- 功能操作区 ---
+        col1, col2 = st.columns([1, 1])
         
         with col1:
-            st.markdown("### 📈 趋势分析")
+            st.markdown("### 📈 趋势监控")
             if not edited_df.empty:
-                # 让用户选择画什么数据的图
-                plot_col = st.selectbox("选择要分析的参数趋势:", ["pH值", "温度(°C)", "平均粒径(nm)"])
-                # 只画数值类型的列
+                plot_col = st.selectbox("分析参数:", ["pH值", "温度(°C)", "平均粒径(nm)"])
                 if plot_col in edited_df.columns:
-                    # 处理一下空值，避免画图报错
                     plot_df = edited_df.dropna(subset=[plot_col])
                     if not plot_df.empty:
-                        st.line_chart(plot_df.set_index("样品编号")[plot_col])
-                    else:
-                        st.info(f"没有关于 {plot_col} 的有效数据。")
-            else:
-                st.info("请先在上方表格录入数据。")
+                        st.line_chart(plot_df.set_index("取样时间")[plot_col])
 
         with col2:
-            st.markdown("### 💾 数据归档")
+            st.markdown("### 🧠 AI 深度诊断")
+            st.caption("DeepSeek 将分析全套数据，寻找潜在问题。")
+            
+            if st.button("🚀 开始 AI 诊断"):
+                if edited_df.empty:
+                    st.warning("请先录入数据！")
+                else:
+                    with st.spinner("AI 正在像导师一样审视你的数据..."):
+                        # 1. 把表格变成字符串，喂给 AI
+                        data_str = edited_df.to_markdown(index=False)
+                        
+                        # 2. 构造专业的 Prompt (强关联食品专业)
+                        prompt = [
+                            {"role": "system", "content": "你是一位资深的食品发酵工程专家。用户会提供一份酸奶/凝胶发酵的实验过程数据。请你：\n1. 分析 pH 值的变化速率是否正常。\n2. 检查温度控制是否稳定。\n3. 指出数据中潜在的异常点或操作失误。\n4. 给出下一步的改进建议。\n请用专业、简练的口吻回答。"},
+                            {"role": "user", "content": f"这是我刚才的实验记录，请帮我诊断一下：\n\n{data_str}"}
+                        ]
+                        
+                        # 3. 调用 AI
+                        analysis = get_deepseek_response(prompt)
+                        
+                        # 4. 展示结果
+                        st.success("✅ 诊断完成")
+                        st.markdown("#### 📋 专家评估报告")
+                        st.info(analysis)
+                        
+                        # 5. 自动推送到手机 (让你在实验室也能收到建议)
+                        # 截取前100字推送到手机
+                        short_analysis = analysis[:100].replace("\n", " ") + "..."
+                        send_bark("AI实验诊断", short_analysis)
+
+            st.divider()
+            # 导出功能 (保留)
             if not edited_df.empty:
-                # 🔥 杀手级功能：导出 CSV
-                # 将 DataFrame 转为 CSV 字符串
-                csv_data = edited_df.to_csv(index=False).encode('utf-8-sig') # utf-8-sig 解决 Excel 打开中文乱码
-                
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-                st.download_button(
-                    label="📥 导出为 Excel (CSV)",
-                    data=csv_data,
-                    file_name=f"实验记录_{timestamp}.csv",
-                    mime="text/csv",
-                    type="primary" # 醒目的按钮
-                )
-                st.caption("导出后可直接用 Excel 打开用于论文作图。")
-                
-                st.divider()
-                # 简易报警
-                current_ph = edited_df["pH值"].iloc[-1] if not edited_df["pH值"].isna().all() else None
-                if current_ph and (current_ph < 4.0 or current_ph > 7.0):
-                     if st.button("🚨 发送 pH 异常报警"):
-                         send_bark("实验室报警", f"最新样品 pH={current_ph:.2f}，超出正常范围！")
-                         st.error("已触发远程报警！")
+                csv = edited_df.to_csv(index=False).encode('utf-8-sig')
+                st.download_button("📥 备份数据 (Excel)", csv, "lab_data.csv", "text/csv")
 
 # ================= 🚀 7. 主程序 =================
 def main():
