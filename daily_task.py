@@ -1,104 +1,118 @@
 import requests
+import re
 import os
+import json
 from datetime import datetime
 
-# --- 配置区域 ---
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-BARK_SERVER = os.getenv("BARK_SERVER")
-BARK_DEVICE_KEY = os.getenv("BARK_DEVICE_KEY")
+# --- 配置区 (从 GitHub Secrets 获取) ---
+# 必须在 GitHub 仓库 Settings -> Secrets -> Actions 中配置这些
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
+BARK_SERVER = os.environ.get("BARK_SERVER")
+BARK_KEY = os.environ.get("BARK_DEVICE_KEY")
 
-# --- 功能 1: 百度新闻爬虫 ---
-def get_baidu_news():
-    print("正在获取百度热搜...")
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
-    return [
-        f"【热点】食品安全新国标解读 (时间: {current_time})",
-        f"【趋势】减脂酸奶的市场潜力分析",
-        f"【科技】AI 如何赋能食品溯源体系"
-    ]
+def get_baidu_hot():
+    """抓取百度实时热搜列表"""
+    print("正在抓取百度热搜...")
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        url = "https://top.baidu.com/board?tab=realtime"
+        resp = requests.get(url, headers=headers)
+        # 正则提取标题
+        titles = re.findall(r'class="c-single-text-ellipsis">(.*?)</div>', resp.text)
+        # 只要前 15 条，给 AI 去筛选
+        clean_titles = [t.strip() for t in titles if len(t) > 2][:15]
+        return clean_titles
+    except Exception as e:
+        print(f"抓取失败: {e}")
+        return []
 
-# --- 功能 2: DeepSeek 智能锐评 ---
-def process_with_deepseek(news_list):
+def ai_analyze_news(news_list):
+    """用 DeepSeek 进行筛选和点评"""
     if not DEEPSEEK_API_KEY:
-        return "错误：未配置 DeepSeek API Key"
-
-    print("正在调用 DeepSeek...")
-    news_text = "\n".join(news_list)
-    prompt = (
-        f"我是一名食品加工与安全的硕士，也是自媒体人。\n"
-        f"请从下面新闻中选一条最值得讨论的，写一段100字以内的专业微头条，要求有深度且通俗：\n\n"
-        f"{news_text}"
-    )
-
+        return "⚠️ GitHub Secrets 未配置 DeepSeek Key，无法进行 AI 分析。"
+    
+    print("正在调用 DeepSeek 进行分析...")
     url = "https://api.deepseek.com/chat/completions"
     headers = {
-        "Content-Type": "application/json",
+        "Content-Type": "application/json", 
         "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
     }
-    data = {
-        "model": "deepseek-chat",
-        "messages": [
-            {"role": "system", "content": "你是一个食品科学领域的专业助手。"},
-            {"role": "user", "content": prompt}
-        ],
-        "stream": False
-    }
-
+    
+    # 构造 Prompt：让 AI 做食品情报员
+    news_text = "\n".join([f"- {t}" for t in news_list])
+    system_prompt = """
+    你是一名【食品行业情报分析师】。
+    请从给定的热搜列表中，筛选出【可能与食品、健康、餐饮、农业、消费】相关的 1-3 条新闻。
+    
+    如果没有直接相关的，就选最热门的一条社会新闻。
+    
+    请输出一份【简报】，格式如下：
+    📅 **今日食安/热点情报**
+    1. **[标题]**
+       💡 *AI微评*：用一句话犀利点评或分析对食品人的启示。
+    (如果没有更多相关新闻，只列1条即可)
+    """
+    
     try:
-        response = requests.post(url, headers=headers, json=data)
-        if response.status_code == 200:
-            # 增加健壮性检查，防止 Key 错误导致返回非 JSON 格式
-            try:
-                return response.json()['choices'][0]['message']['content']
-            except:
-                return f"DeepSeek 返回格式异常: {response.text}"
+        resp = requests.post(url, headers=headers, json={
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"今日热搜列表：\n{news_text}"}
+            ],
+            "stream": False
+        })
+        if resp.status_code == 200:
+            return resp.json()['choices'][0]['message']['content']
         else:
-            return f"DeepSeek 调用失败: {response.status_code}"
+            return f"AI 思考失败: {resp.text}"
     except Exception as e:
-        return f"请求异常: {e}"
+        return f"AI 请求异常: {e}"
 
-# --- 功能 3: Bark 推送 (修复版) ---
-def send_bark_notification(title, content):
-    if not BARK_SERVER or not BARK_DEVICE_KEY:
-        print("警告：Bark 配置不完整，跳过推送")
+def send_bark(title, content):
+    """发送 Bark 推送"""
+    if not BARK_SERVER or not BARK_KEY:
+        print("Bark 配置缺失，跳过推送")
+        return
+    
+    print("正在发送推送...")
+    # Bark 的 URL 只能通过 GET 传参，内容需要简单处理一下
+    # 为了防止太长，DeepSeek 输出的内容如果太长可能会被截断，这里不作特殊处理，Bark会自动折叠
+    base_url = BARK_SERVER.rstrip("/")
+    
+    # 组合 URL: server/key/title/content
+    # 注意：Bark 也可以用 POST 发送，这里为了兼容旧代码用 GET，但更稳妥是用 POST
+    # 这里我们切换为 POST 方法以支持长文本
+    push_url = f"{base_url}/{BARK_KEY}"
+    payload = {
+        "title": title,
+        "body": content,
+        "group": "FoodMaster情报",
+        "icon": "https://cdn-icons-png.flaticon.com/512/2921/2921822.png" # 一个好看的烧瓶图标
+    }
+    
+    try:
+        requests.post(push_url, data=payload)
+        print("推送成功！")
+    except Exception as e:
+        print(f"推送失败: {e}")
+
+def main():
+    # 1. 抓取
+    hot_list = get_baidu_hot()
+    if not hot_list:
+        send_bark("运行报错", "未能抓取到热搜数据")
         return
 
-    print("正在构建 Bark 推送...")
-    
-    # 1. 清理服务器地址
-    clean_server = BARK_SERVER.rstrip('/')
-    
-    # 2. 【关键修正】在这里明确定义 target_url
-    target_url = f"{clean_server}/{BARK_DEVICE_KEY}/{title}/{content}"
-    
-    # 打印一下我们要访问的地址（隐去 Key），方便调试
-    print(f"目标 URL: {clean_server}/******/{title}/...")
+    # 2. AI 分析
+    ai_report = ai_analyze_news(hot_list)
+    print("AI 简报内容：")
+    print(ai_report)
 
-    try:
-        # 3. 发送请求
-        response = requests.get(target_url)
-        
-        # 4. 打印结果
-        if response.status_code == 200:
-            print(f"Bark 推送成功！服务器回复: {response.text}")
-        else:
-            print(f"Bark 推送失败！状态码: {response.status_code}")
-            print(f"错误信息: {response.text}")
-            
-    except Exception as e:
-        print(f"请求发送异常: {e}")
+    # 3. 推送
+    # 标题用当天的日期
+    date_str = datetime.now().strftime("%m-%d")
+    send_bark(f"早报 {date_str}", ai_report)
 
-# --- 主程序 ---
 if __name__ == "__main__":
-    print(">>> 自动化任务开始 (修复变量丢失版)")
-    
-    news = get_baidu_news()
-    print(f"获取新闻: {len(news)} 条")
-    
-    comment = process_with_deepseek(news)
-    print("AI 思考完成")
-    
-    today = datetime.now().strftime("%m-%d")
-    send_bark_notification(f"食品科研日报-{today}", comment)
-    
-    print(">>> 自动化任务结束")
+    main()
