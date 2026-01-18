@@ -1,36 +1,53 @@
-# 🍔 FoodAI Assistant (食品安全 AI 助手)
+# 🧬 FoodMaster Pro: 食品研发与自媒体自动化工作流
 
-> 一个集成了 AI 智能问答、RAG 文档分析、动态新闻爬取与自动视频生成的全栈食品安全助手。
+> **The Digital Co-Pilot for Food Scientists & Creators**
+> 专为食品硕士打造的"科研+内容"双轨制 AI 辅助系统。
 
-## 🌟 项目简介
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://你的Streamlit链接填在这里)
+[![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
+[![DeepSeek](https://img.shields.io/badge/AI-DeepSeek%20V3%2FR1-brightgreen)](https://www.deepseek.com/)
 
-本项目旨在利用大模型技术解决食品安全领域的知识获取难题。它不仅是一个基于 Web 的问答系统，还包含了一个自动化的自媒体内容生产流水线。
+## 📖 项目背景 (Background)
 
-### 核心功能
-1.  **🤖 AI 智能问答 (Web)**: 集成 DeepSeek 大模型，提供专业的食品安全咨询。
-2.  **📄 论文/文档分析 (RAG)**: 支持上传 PDF/Excel，通过 RAG 技术实现基于文档的精准问答。
-3.  **🕷️ 动态情报监测 (Selenium)**: 自动化抓取百度新闻/社交媒体关于特定食品关键词的舆情。
-4.  **🎬 内容自动化工厂 (Automation)**: 
-    - 自动聚合热点新闻
-    - AI 生成短视频脚本
-    - Edge-TTS 自动生成语音解说
+作为一名食品加工与安全专业的硕士，我发现传统研发与内容创作中存在大量重复性工作。本项目旨在利用 **Python 全栈技术** 与 **LLM (大语言模型)**，构建一套自动化的数字化工作流。
 
-## 🛠️ 技术栈
+**核心解决痛点：**
+1.  **法规检索难**：GB 标准繁多，人工查阅效率低。
+2.  **研发周期长**：新品概念落地缺乏数据支撑。
+3.  **信息差**：行业热点获取滞后，自媒体内容生产效率低。
 
-* **核心语言**: Python 3.8+
-* **Web 框架**: Streamlit (已部署至 Streamlit Cloud)
-* **大模型 API**: DeepSeek-V3
-* **数据采集**: Selenium + WebDriver Manager
-* **语音合成**: Edge-TTS
-* **数据处理**: Pandas, PyPDF2, BeautifulSoup4
+## ✨ 核心功能 (Key Features)
 
-## 📂 项目结构
+### 🔬 1. R&D 智能研发系统
+- **🧠 双核大脑**：集成 **DeepSeek-V3** (极速) 与 **DeepSeek-R1** (深度推理)，支持 CoT 思维链展示。
+- **📄 RAG 文档分析**：支持上传 PDF (GB标准/文献)，AI 基于文档内容进行精准问答，消除幻觉。
+- **📊 可视化风味模拟**：基于 Plotly 绘制产品感官雷达图，辅助配方设计。
+- **💬 记忆对话 & ELN**：支持多轮上下文对话，并可一键导出 **Markdown 格式实验记录 (ELN)**。
 
-```text
-AI_Test/
-├── 16_food_web_pro.py    # [Web端] Streamlit 主程序
-├── full_auto_studio.py   # [本地端] 全自动内容生产流水线
-├── config.json           # [配置] API 密钥配置文件 (已脱敏)
-├── requirements.txt      # [依赖] 项目依赖库清单
-├── output_files/         # [产物] 存放生成的 MP3、Excel 和视频素材
-└── old_learning/         # [归档] 早期开发过程中的测试代码
+### 🎬 2. 自媒体自动化工厂
+- **🔥 全网情报**：实时抓取全网/百度热搜，AI 自动筛选食品相关选题。
+- **📝 脚本生成**：一键生成辟谣/测评/科普类的分镜脚本（Markdown 表格）。
+- **🎙️ AI 配音室**：集成 **Edge-TTS**，免费生成新闻级/解说级 AI 语音。
+
+### ⚙️ 3. 云端无人值守监控
+- **🤖 GitHub Actions**：每日定时运行爬虫脚本。
+- **📲 Bark 推送**：自动将 AI 整理的《今日食品情报简报》推送至手机。
+
+## 🛠 技术栈 (Tech Stack)
+
+* **Frontend**: Streamlit (Web UI)
+* **Backend**: Python, Pandas
+* **AI Model**: DeepSeek-V3 / DeepSeek-R1 (via API)
+* **RAG**: pdfplumber (PDF Parsing)
+* **Visualization**: Plotly Interactive Charts
+* **Audio**: Edge-TTS (Async Text-to-Speech)
+* **DevOps**: GitHub Actions, Streamlit Cloud
+
+## 🚀 快速开始 (Quick Start)
+
+1. **访问在线演示**: [点击这里体验](https://你的Streamlit链接填在这里) (密码: 123456)
+2. **本地运行**:
+   ```bash
+   git clone [https://github.com/你的用户名/你的仓库名.git](https://github.com/你的用户名/你的仓库名.git)
+   pip install -r requirements.txt
+   streamlit run 16_food_web_pro.py
