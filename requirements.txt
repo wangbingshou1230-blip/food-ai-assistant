@@ -6,3 +6,5 @@ pdfplumber
 wordcloud
 matplotlib
 tabulate
+requests
+beautifulsoup4 

@@ -1,39 +1,46 @@
-name: Daily Crawler
+# .github/workflows/daily.yml
 
+name: Daily Research & Media Bot # 工作流名称
+
+# 触发条件
 on:
-  workflow_dispatch:
   schedule:
+    # 每天北京时间早上 08:00 运行
+    # GitHub 使用 UTC 时间，北京时间是 UTC+8，所以这里设为 00:00 UTC
     - cron: '0 0 * * *'
+  
+  # 允许你手动点击按钮触发（方便测试用）
+  workflow_dispatch:
 
 jobs:
-  run-crawler:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    
+  build:
+    runs-on: ubuntu-latest # 使用最新的 Ubuntu 虚拟机
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-      
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
-          
-      - name: Install Libs
-        run: pip install requests pandas openpyxl beautifulsoup4
-        
-      - name: Run Script
-        env:
-          deepseek_api_key: ${{ secrets.deepseek_api_key }}
-          bark_device_key: ${{ secrets.bark_device_key }}
-          bark_server: ${{ secrets.bark_server }}
-        run: python daily_task.py
-        
-      - name: Save Data
-        run: |
-          git config --global user.name "Bot"
-          git config --global user.email "bot@github.com"
-          git add output_files/*.xlsx
-          git commit -m "Auto update" || exit 0
-          git push
+    # 1. 拉取你的代码仓库
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    # 2. 配置 Python 环境
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9' # 推荐使用稳定版本
+
+    # 3. 安装依赖 (这一步会读取你的 requirements.txt)
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+    # ... 前面的代码不变 ...
+    
+    # 4. 运行你的核心脚本
+    - name: Run Daily Task
+      env:
+        # 注意这里名称要和 daily_task.py 里 os.getenv 的名称一致
+        DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        BARK_SERVER: ${{ secrets.BARK_SERVER }}
+        BARK_DEVICE_KEY: ${{ secrets.BARK_DEVICE_KEY }}
+      run: |
+        python daily_task.py
