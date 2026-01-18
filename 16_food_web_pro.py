@@ -73,12 +73,11 @@ def get_realtime_news():
     except Exception as e:
         return [f"抓取异常: {e}"]
 
-# --- 工具 3: PDF 提取 (保持不变) ---
 def extract_text_from_pdf(file):
     try:
         with pdfplumber.open(file) as pdf:
             text = ""
-            for page in pdf.pages[:5]: # 为了速度，只读前5页
+            for page in pdf.pages[:5]: 
                 text += page.extract_text() + "\n"
             return text
     except:
@@ -94,80 +93,79 @@ app_mode = st.sidebar.selectbox(
 )
 
 # ==================================================
-# 模块 1: R&D 研发 (多文档升级版!)
+# 模块 1: R&D 研发 (完全体修复版)
 # ==================================================
 if app_mode == "🔬 R&D 研发与合规 (求职作品)":
     st.title("🔬 智能研发与法规助手")
-    st.markdown("集成 **RAG (检索增强生成)** 技术，支持**多文档对比分析**。")
+    st.markdown("集成 **RAG (检索增强生成)** 技术，支持多文档对比分析。")
     
     tab1, tab2, tab3 = st.tabs(["⚖️ GB法规咨询", "📄 智能文档分析 (RAG)", "📊 新品概念研发"])
 
+    # Tab 1: 简单查询
     with tab1:
-        st.info("场景：快速合规查询")
+        st.info("场景：快速合规查询 (不依赖文档)")
         query = st.text_area("输入问题", "果冻中能否添加山梨酸钾？")
         if st.button("开始审查"):
             st.markdown(call_deepseek("你是一名食品法规专员。", query))
 
-    with tab3:
-        st.subheader("💡 新品概念生成")
-        c1, c2 = st.columns(2)
-        with c1: base_product = st.text_input("基底产品", "酸奶")
-        with c2: target_user = st.text_input("目标人群", "减脂党")
-        if st.button("生成概念书"):
-            st.markdown(call_deepseek("我是研发工程师，请生成产品概念书。", f"{base_product} for {target_user}"))
-
-    # --- 🔥 核心升级区：多文档分析 ---
+    # Tab 2: 多文档分析 (保留新功能)
     with tab2:
         st.subheader("📄 智能文档分析 (Multi-Docs)")
         st.markdown("**核心价值**：支持上传多个 PDF (如：对比新旧国标、综述多篇文献)。")
         
-        # 1. 开启 accept_multiple_files=True
-        uploaded_files = st.file_uploader(
-            "上传 PDF 文件 (支持多选)", 
-            type="pdf", 
-            accept_multiple_files=True
-        )
+        uploaded_files = st.file_uploader("上传 PDF 文件 (支持多选)", type="pdf", accept_multiple_files=True)
         
         if uploaded_files:
             st.success(f"已上传 {len(uploaded_files)} 个文件")
-            
-            # 2. 循环读取所有文件内容
-            all_files_content = ""
             if st.button("📥 开始读取并分析"):
+                all_files_content = ""
                 progress_bar = st.progress(0)
-                
                 for i, file in enumerate(uploaded_files):
                     with st.spinner(f"正在读取 {file.name}..."):
                         text = extract_text_from_pdf(file)
-                        # 给每个文件的内容打上标签，方便 AI 区分
                         all_files_content += f"\n--- 文档名称：{file.name} ---\n{text}\n"
                     progress_bar.progress((i + 1) / len(uploaded_files))
                 
-                # 将读取到的内容暂存，避免刷新丢失
                 st.session_state['pdf_context'] = all_files_content
-                st.success("✅ 所有文档读取完毕！请在下方提问。")
+                st.success("✅ 读取完毕！")
 
-            # 3. 针对多文档提问
             if 'pdf_context' in st.session_state:
                 doc_query = st.text_input("针对这些文档，你想问什么？", placeholder="例如：对比这几份文档中关于‘防腐剂’规定的异同点")
-                
                 if st.button("🤖 综合回答"):
                     if doc_query:
-                        # RAG Prompt 升级：强调“综合分析”
                         sys_prompt = f"""
                         你是一个专业的文档分析助手。用户上传了多个文档。
                         请基于以下【文档内容集】，回答用户的问题。
-                        
-                        【文档内容集】：
-                        {st.session_state['pdf_context'][:6000]} ... (内容已截断)
-                        
-                        要求：
-                        1. 如果问题涉及对比，请明确指出不同文档的区别。
-                        2. 引用时请说明出自哪个文档（如：根据文档A...）。
+                        【文档内容集】：{st.session_state['pdf_context'][:6000]} ... 
+                        要求：明确指出不同文档的区别，引用文档名称。
                         """
                         res = call_deepseek(sys_prompt, doc_query)
-                        st.markdown("### 📝 分析结果")
                         st.markdown(res)
+
+    # Tab 3: 新品研发 (🔥 这里完全恢复了 v2.2 的功能 🔥)
+    with tab3:
+        st.subheader("💡 新品概念生成")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            base_product = st.text_input("基底产品", "酸奶")
+        with col2:
+            target_user = st.text_input("目标人群", "熬夜打工人")
+            
+        # 恢复了下拉框！
+        trend = st.selectbox("结合趋势", ["药食同源", "0糖0卡", "高蛋白", "助眠/解压", "清洁标签"])
+        
+        if st.button("🧪 生成产品概念书"):
+            # 恢复了详细 Prompt！
+            sys_prompt = (
+                "你是一名食品研发工程师（R&D Engineer）。"
+                "请根据用户输入，生成一份简要的《新产品开发概念书》。"
+                "输出格式要求：Markdown。"
+                "包含：\n1. 产品名称\n2. 核心卖点 (USP)\n3. 建议添加的功能性成分\n4. 风味描述\n5. 包装设计建议"
+            )
+            req = f"基底：{base_product}，人群：{target_user}，趋势：{trend}"
+            res = call_deepseek(sys_prompt, req)
+            st.markdown(res)
 
 # ==================================================
 # 模块 2: 自媒体内容矩阵 (保持不变)
