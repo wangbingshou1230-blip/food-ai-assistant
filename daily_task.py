@@ -64,11 +64,20 @@ def send_bark_notification(title, content):
     clean_server = BARK_SERVER.rstrip('/')
     target_url = f"{clean_server}/{BARK_DEVICE_KEY}/{title}/{content}"
     
-    try:
-        requests.get(target_url)
-        print("Bark 推送成功！")
-    except Exception as e:
-        print(f"Bark 推送失败: {e}")
+try:
+        # 修改点：接收返回值，并判断状态码
+        response = requests.get(target_url)
+        
+        # 只有状态码是 200 才算真的成功
+        if response.status_code == 200:
+            print(f"Bark 推送成功！服务器回复: {response.text}")
+        else:
+            print(f"Bark 推送失败！状态码: {response.status_code}")
+            print(f"服务器错误信息: {response.text}")
+            print(f"检查你的 Key 是否正确: {BARK_DEVICE_KEY[:5]}******") # 只打印前几位核对
+            
+except Exception as e:
+        print(f"请求发送异常: {e}")
 
 if __name__ == "__main__":
     print(">>> 自动化任务开始")
