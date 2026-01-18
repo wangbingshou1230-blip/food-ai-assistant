@@ -39,15 +39,13 @@ if not check_password():
     st.stop()
 
 # ==================================================
-#  系统主逻辑 (登录后自动加载后台 Key)
+#  系统配置自动加载 (DeepSeek & Bark)
 # ==================================================
 
-# --- 自动读取配置 ---
+# 1. 检查 DeepSeek Key
 if "DEEPSEEK_API_KEY" not in st.secrets:
-    st.error("⚠️ 系统配置错误：未找到 DeepSeek API Key，请在 Streamlit Secrets 中配置。")
+    st.error("⚠️ 配置缺失：请在 Secrets 中添加 DEEPSEEK_API_KEY")
     st.stop()
-
-# 直接获取 Key，不再显示输入框
 API_KEY = st.secrets["DEEPSEEK_API_KEY"]
 
 # --- 侧边栏 ---
@@ -84,10 +82,7 @@ def call_deepseek(system_prompt, user_input):
 # --- 模块 1: R&D 研发与合规 ---
 if app_mode == "🔬 R&D 研发与合规 (求职作品)":
     st.title("🔬 智能研发与法规助手")
-    st.markdown("""
-    **设计理念**：针对食品研发中"法规检索繁琐"、"竞品分析低效"的痛点，
-    利用 LLM 构建的垂直领域辅助系统。
-    """)
+    st.markdown("设计理念：针对食品研发中法规检索繁琐痛点，利用 LLM 构建的垂直领域辅助系统。")
     
     tab1, tab2 = st.tabs(["⚖️ GB法规智能咨询", "📊 新品概念研发"])
 
@@ -140,16 +135,25 @@ elif app_mode == "🎬 自媒体内容矩阵 (副业工具)":
         res = call_deepseek(sys_prompt, topic)
         st.markdown(res)
 
-# --- 模块 3: 云端数据看板 ---
+# --- 模块 3: 云端数据看板 (Bark 内置版) ---
 elif app_mode == "⚙️ 云端数据看板":
     st.title("⚙️ 自动化系统监控")
     st.info("云端任务：daily_task.py 正在 GitHub 服务器上每日 08:00 运行")
     
-    bark_url = st.text_input("Bark URL 配置", placeholder="https://api.day.app/...")
-    if st.button("📲 发送测试推送"):
-         if bark_url:
+    # 这里不再显示输入框，而是直接从 Secrets 读取
+    if st.button("📲 发送测试推送 (使用内置配置)"):
+        # 1. 检查配置是否存在
+        if "BARK_SERVER" in st.secrets and "BARK_DEVICE_KEY" in st.secrets:
+            server = st.secrets["BARK_SERVER"].rstrip('/')
+            key = st.secrets["BARK_DEVICE_KEY"]
+            
+            # 2. 发送请求
             try:
-                requests.get(f"{bark_url.rstrip('/')}/云端连接测试/网页端指令已发送")
-                st.success("推送已发送")
+                # 构造 URL: Server/Key/Title/Content
+                test_url = f"{server}/{key}/云端连接测试/网页端指令已发送"
+                requests.get(test_url)
+                st.success(f"✅ 推送已发送！(目标设备 Key: {key[:5]}******)")
             except Exception as e:
-                st.error(f"失败: {e}")
+                st.error(f"❌ 发送失败: {e}")
+        else:
+            st.error("⚠️ 也就是 Secrets 里没填 BARK_SERVER 或 BARK_DEVICE_KEY，快去填！")
