@@ -3,7 +3,7 @@ import requests
 import os
 from datetime import datetime
 
-# --- 页面配置 ---
+# --- 1. 页面基础配置 ---
 st.set_page_config(
     page_title="FoodMaster 智能工作台",
     page_icon="🧬",
@@ -11,11 +11,42 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 侧边栏：双重身份切换 ---
+# --- 2. 🔐 登录验证系统 ---
+def check_password():
+    """验证密码，成功返回 True，失败停止运行"""
+    if st.session_state.get("password_correct", False):
+        return True
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.title("🔒 FoodMaster Pro 登录")
+        st.markdown("---")
+        password = st.text_input("请输入访问密码", type="password")
+        
+        if st.button("🚀 登录系统"):
+            # 优先从 Secrets 读取密码，如果没配置则使用默认密码
+            correct_password = st.secrets.get("APP_PASSWORD", "123456")
+            
+            if password == correct_password:
+                st.session_state["password_correct"] = True
+                st.rerun()
+            else:
+                st.error("❌ 密码错误，请重试")
+    
+    return False
+
+# 如果没有通过密码验证，直接停止运行后续代码
+if not check_password():
+    st.stop()
+
+# ==================================================
+#  系统主逻辑 (登录后才显示)
+# ==================================================
+
+# --- 侧边栏配置 ---
 st.sidebar.title("🧬 FoodMaster Pro")
 st.sidebar.caption("食品硕士的数字化解决方案")
 
-# 你的简历核心卖点：既懂研发，又懂内容
 app_mode = st.sidebar.selectbox(
     "选择工作模式",
     ["🔬 R&D 研发与合规 (求职作品)", "🎬 自媒体内容矩阵 (副业工具)", "⚙️ 云端数据看板"]
@@ -46,7 +77,15 @@ def call_deepseek(api_key, system_prompt, user_input):
     except Exception as e:
         return f"请求异常: {e}"
 
-# --- 模块 1: R&D 研发与合规 (面试大杀器) ---
+# --- 智能获取 API Key (优先读后台，读不到显示输入框) ---
+if "DEEPSEEK_API_KEY" in st.secrets:
+    # 如果后台配置了 Key，直接用，不显示输入框，体验更丝滑
+    api_key = st.secrets["DEEPSEEK_API_KEY"]
+else:
+    # 否则在侧边栏显示输入框
+    api_key = st.sidebar.text_input("DeepSeek API Key", type="password")
+
+# --- 模块 1: R&D 研发与合规 ---
 if app_mode == "🔬 R&D 研发与合规 (求职作品)":
     st.title("🔬 智能研发与法规助手")
     st.markdown("""
@@ -54,8 +93,6 @@ if app_mode == "🔬 R&D 研发与合规 (求职作品)":
     利用 LLM 构建的垂直领域辅助系统。
     """)
     
-    api_key = st.text_input("DeepSeek API Key", type="password")
-
     tab1, tab2 = st.tabs(["⚖️ GB法规智能咨询", "📊 新品概念研发"])
 
     with tab1:
@@ -76,8 +113,6 @@ if app_mode == "🔬 R&D 研发与合规 (求职作品)":
 
     with tab2:
         st.subheader("💡 新品概念生成")
-        st.info("场景：基于市场热点，辅助研发工程师快速产出产品概念书。")
-        
         col1, col2 = st.columns(2)
         with col1:
             base_product = st.text_input("基底产品", "酸奶")
@@ -91,22 +126,19 @@ if app_mode == "🔬 R&D 研发与合规 (求职作品)":
                 "你是一名食品研发工程师（R&D Engineer）。"
                 "请根据用户输入，生成一份简要的《新产品开发概念书》。"
                 "包含：1. 产品名称 2. 核心卖点 3. 建议添加的功能性成分 4. 口味描述。"
-                "风格要专业，符合工业化生产的可行性。"
             )
             req = f"基底：{base_product}，人群：{target_user}，趋势：{trend}"
             res = call_deepseek(api_key, sys_prompt, req)
             st.markdown(res)
 
-# --- 模块 2: 自媒体内容矩阵 (副业工具) ---
+# --- 模块 2: 自媒体内容矩阵 ---
 elif app_mode == "🎬 自媒体内容矩阵 (副业工具)":
     st.title("🎬 自动化内容生产工厂")
     st.markdown("利用专业背景，批量生产高质量科普/测评脚本。")
     
-    api_key = st.text_input("DeepSeek API Key", type="password")
-    
     col1, col2 = st.columns([2, 1])
     with col1:
-        topic = st.text_input("输入选题 (如：科技与狠活)", placeholder="输入新闻热点或成分名称")
+        topic = st.text_input("输入选题", placeholder="例如：科技与狠活、阿斯巴甜")
     with col2:
         script_type = st.selectbox("脚本类型", ["辟谣粉碎机", "红黑榜测评", "行业内幕揭秘"])
         
@@ -121,16 +153,13 @@ elif app_mode == "🎬 自媒体内容矩阵 (副业工具)":
         res = call_deepseek(api_key, sys_prompt, topic)
         st.markdown(res)
 
-# --- 模块 3: 云端数据 (原有功能) ---
+# --- 模块 3: 云端数据看板 ---
 elif app_mode == "⚙️ 云端数据看板":
     st.title("⚙️ 自动化系统监控")
-    st.write("监控 GitHub Actions 每日爬虫任务状态")
-    
-    # 这里可以放你之前的 Bark 测试或者简单的热点展示
     st.info("云端任务：daily_task.py 正在 GitHub 服务器上每日 08:00 运行")
     
     bark_url = st.text_input("Bark URL 配置", placeholder="https://api.day.app/...")
-    if st.button("📲 发送测试推送到手机"):
+    if st.button("📲 发送测试推送"):
          if bark_url:
             try:
                 requests.get(f"{bark_url.rstrip('/')}/云端连接测试/网页端指令已发送")
