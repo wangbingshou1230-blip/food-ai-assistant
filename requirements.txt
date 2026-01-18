@@ -8,3 +8,4 @@ matplotlib
 tabulate
 requests
 beautifulsoup4 
+plotly
