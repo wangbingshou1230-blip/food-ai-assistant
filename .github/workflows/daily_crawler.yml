@@ -1,41 +1,39 @@
-name: Daily FoodAI Crawler
+name: Daily Crawler
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: '0 0 * * *'
-  workflow_dispatch:
 
 jobs:
-  daily-job:
+  run-crawler:
     runs-on: ubuntu-latest
-    
     permissions:
       contents: write
-
+    
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-
-    - name: Install dependencies
-      run: |
-        pip install requests pandas openpyxl beautifulsoup4
-
-    - name: Run Crawler
-      env:
-        deepseek_api_key: ${{ secrets.deepseek_api_key }}
-        bark_device_key: ${{ secrets.bark_device_key }}
-        bark_server: ${{ secrets.bark_server }}
-      run: python daily_task.py
-
-    - name: Commit and Push
-      run: |
-        git config --global user.name "GitHub Action Bot"
-        git config --global user.email "bot@github.com"
-        git add output_files/*.xlsx
-        git commit -m "📈 Auto-update: Daily news data" || exit 0
-        git push
+      - name: Checkout
+        uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Install Libs
+        run: pip install requests pandas openpyxl beautifulsoup4
+        
+      - name: Run Script
+        env:
+          deepseek_api_key: ${{ secrets.deepseek_api_key }}
+          bark_device_key: ${{ secrets.bark_device_key }}
+          bark_server: ${{ secrets.bark_server }}
+        run: python daily_task.py
+        
+      - name: Save Data
+        run: |
+          git config --global user.name "Bot"
+          git config --global user.email "bot@github.com"
+          git add output_files/*.xlsx
+          git commit -m "Auto update" || exit 0
+          git push
