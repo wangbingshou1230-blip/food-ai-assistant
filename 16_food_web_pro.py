@@ -2,6 +2,8 @@ import streamlit as st
 import requests
 import re
 import pdfplumber
+import pandas as pd
+import plotly.graph_objects as go # 新增：用于画帅气的雷达图
 from io import BytesIO
 
 # --- 1. 页面基础配置 ---
@@ -83,6 +85,46 @@ def extract_text_from_pdf(file):
     except:
         return ""
 
+# --- 新增：画雷达图的函数 ---
+def plot_sensory_radar(product_name, trend):
+    """
+    根据产品名称生成一个模拟的感官雷达图。
+    (在真实项目中，这里的数据应该由 AI 生成或实验室测得，这里为了演示做模拟)
+    """
+    categories = ['甜度', '酸度', '苦度', '咸度', '鲜度']
+    
+    # 简单的预设逻辑，让图表看起来有点逻辑
+    if "酸奶" in product_name:
+        values = [3, 4, 1, 0, 2]
+    elif "咖啡" in product_name:
+        values = [2, 3, 5, 0, 1]
+    elif "茶" in product_name:
+        values = [1, 2, 4, 0, 3]
+    elif "麻辣" in product_name or "肉" in product_name:
+        values = [1, 1, 1, 4, 5]
+    else:
+        values = [3, 2, 1, 1, 2] # 默认均衡
+        
+    # 根据趋势微调
+    if "0糖" in trend:
+        values[0] = 1 # 甜度降低
+    
+    fig = go.Figure()
+    fig.add_trace(go.Scatterpolar(
+        r=values,
+        theta=categories,
+        fill='toself',
+        name=product_name,
+        line_color='#FF4B4B'
+    ))
+    
+    fig.update_layout(
+        polar=dict(radialaxis=dict(visible=True, range=[0, 5])),
+        showlegend=False,
+        margin=dict(t=20, b=20, l=40, r=40) # 调整边距
+    )
+    return fig
+
 # --- 侧边栏 ---
 st.sidebar.title("🧬 FoodMaster Pro")
 st.sidebar.caption("食品硕士的数字化解决方案")
@@ -93,82 +135,72 @@ app_mode = st.sidebar.selectbox(
 )
 
 # ==================================================
-# 模块 1: R&D 研发 (完全体修复版)
+# 模块 1: R&D 研发 (可视化升级版)
 # ==================================================
 if app_mode == "🔬 R&D 研发与合规 (求职作品)":
     st.title("🔬 智能研发与法规助手")
-    st.markdown("集成 **RAG (检索增强生成)** 技术，支持多文档对比分析。")
+    st.markdown("集成 **RAG 文档分析** 与 **数据可视化** 引擎。")
     
-    tab1, tab2, tab3 = st.tabs(["⚖️ GB法规咨询", "📄 智能文档分析 (RAG)", "📊 新品概念研发"])
+    tab1, tab2, tab3 = st.tabs(["⚖️ GB法规咨询", "📄 智能文档分析", "📊 新品概念研发"])
 
-    # Tab 1: 简单查询
     with tab1:
-        st.info("场景：快速合规查询 (不依赖文档)")
+        st.info("场景：快速合规查询")
         query = st.text_area("输入问题", "果冻中能否添加山梨酸钾？")
         if st.button("开始审查"):
             st.markdown(call_deepseek("你是一名食品法规专员。", query))
 
-    # Tab 2: 多文档分析 (保留新功能)
     with tab2:
         st.subheader("📄 智能文档分析 (Multi-Docs)")
-        st.markdown("**核心价值**：支持上传多个 PDF (如：对比新旧国标、综述多篇文献)。")
-        
-        uploaded_files = st.file_uploader("上传 PDF 文件 (支持多选)", type="pdf", accept_multiple_files=True)
+        uploaded_files = st.file_uploader("上传 PDF 文件", type="pdf", accept_multiple_files=True)
         
         if uploaded_files:
             st.success(f"已上传 {len(uploaded_files)} 个文件")
-            if st.button("📥 开始读取并分析"):
+            if st.button("📥 读取并分析"):
                 all_files_content = ""
                 progress_bar = st.progress(0)
                 for i, file in enumerate(uploaded_files):
-                    with st.spinner(f"正在读取 {file.name}..."):
-                        text = extract_text_from_pdf(file)
-                        all_files_content += f"\n--- 文档名称：{file.name} ---\n{text}\n"
+                    text = extract_text_from_pdf(file)
+                    all_files_content += f"\n--- 文档：{file.name} ---\n{text}\n"
                     progress_bar.progress((i + 1) / len(uploaded_files))
-                
                 st.session_state['pdf_context'] = all_files_content
                 st.success("✅ 读取完毕！")
 
             if 'pdf_context' in st.session_state:
-                doc_query = st.text_input("针对这些文档，你想问什么？", placeholder="例如：对比这几份文档中关于‘防腐剂’规定的异同点")
+                doc_query = st.text_input("你想问什么？", placeholder="例如：对比防腐剂使用规定")
                 if st.button("🤖 综合回答"):
-                    if doc_query:
-                        sys_prompt = f"""
-                        你是一个专业的文档分析助手。用户上传了多个文档。
-                        请基于以下【文档内容集】，回答用户的问题。
-                        【文档内容集】：{st.session_state['pdf_context'][:6000]} ... 
-                        要求：明确指出不同文档的区别，引用文档名称。
-                        """
-                        res = call_deepseek(sys_prompt, doc_query)
-                        st.markdown(res)
+                    sys = f"基于以下文档回答：\n{st.session_state['pdf_context'][:6000]}"
+                    st.markdown(call_deepseek(sys, doc_query))
 
-    # Tab 3: 新品研发 (🔥 这里完全恢复了 v2.2 的功能 🔥)
+    # --- 🔥 核心可视化升级区 ---
     with tab3:
-        st.subheader("💡 新品概念生成")
+        st.subheader("💡 新品概念生成 & 风味模拟")
         
-        col1, col2 = st.columns(2)
-        with col1:
-            base_product = st.text_input("基底产品", "酸奶")
-        with col2:
-            target_user = st.text_input("目标人群", "熬夜打工人")
-            
-        # 恢复了下拉框！
+        c1, c2 = st.columns(2)
+        with c1: base_product = st.text_input("基底产品", "0糖酸奶")
+        with c2: target_user = st.text_input("目标人群", "减脂党")
         trend = st.selectbox("结合趋势", ["药食同源", "0糖0卡", "高蛋白", "助眠/解压", "清洁标签"])
         
-        if st.button("🧪 生成产品概念书"):
-            # 恢复了详细 Prompt！
-            sys_prompt = (
-                "你是一名食品研发工程师（R&D Engineer）。"
-                "请根据用户输入，生成一份简要的《新产品开发概念书》。"
-                "输出格式要求：Markdown。"
-                "包含：\n1. 产品名称\n2. 核心卖点 (USP)\n3. 建议添加的功能性成分\n4. 风味描述\n5. 包装设计建议"
-            )
+        if st.button("🧪 生成概念书 & 风味雷达"):
+            # 1. 生成文字
+            sys_prompt = "你是一名食品研发工程师。请生成《新产品开发概念书》（Markdown格式），包含卖点、配料、风味、包装建议。"
             req = f"基底：{base_product}，人群：{target_user}，趋势：{trend}"
-            res = call_deepseek(sys_prompt, req)
-            st.markdown(res)
+            
+            # 使用两列布局：左边文字，右边图表
+            col_text, col_chart = st.columns([3, 2])
+            
+            with col_text:
+                res = call_deepseek(sys_prompt, req)
+                st.markdown(res)
+                
+            with col_chart:
+                st.markdown("### 🧬 预估风味轮廓")
+                st.caption("基于基底产品与目标人群的 AI 模拟数据")
+                # 调用画图函数
+                fig = plot_sensory_radar(base_product, trend)
+                st.plotly_chart(fig, use_container_width=True)
 
 # ==================================================
-# 模块 2: 自媒体内容矩阵 (保持不变)
+# 模块 2: 自媒体内容矩阵
 # ==================================================
 elif app_mode == "🎬 自媒体内容矩阵 (副业工具)":
     st.title("🎬 自动化内容生产工厂")
@@ -186,11 +218,11 @@ elif app_mode == "🎬 自媒体内容矩阵 (副业工具)":
         with c2: style = st.selectbox("风格", ["实拍", "动漫", "赛博"])
         if st.button("🚀 生成脚本"):
             if topic:
-                prompt = f"我是食品科普博主。选题：{topic}。类型：{type_}。风格：{style}。输出Markdown分镜表。"
+                prompt = f"我是科普博主。选题：{topic}。类型：{type_}。风格：{style}。输出Markdown分镜表。"
                 st.markdown(call_deepseek(prompt, topic))
 
 # ==================================================
-# 模块 3: 云端看板 (保持不变)
+# 模块 3: 云端看板
 # ==================================================
 elif app_mode == "⚙️ 云端数据看板":
     st.title("⚙️ 自动化系统监控")
