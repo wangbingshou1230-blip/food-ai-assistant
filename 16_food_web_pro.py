@@ -25,7 +25,7 @@ def check_password():
         
         if st.button("🚀 登录系统"):
             # 优先从 Secrets 读取密码，如果没配置则使用默认密码
-            correct_password = st.secrets.get("APP_PASSWORD", "123456")
+            correct_password = st.secrets.get("APP_PASSWORD", "Wang1230.")
             
             if password == correct_password:
                 st.session_state["password_correct"] = True
