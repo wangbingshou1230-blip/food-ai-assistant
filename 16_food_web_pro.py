@@ -140,10 +140,9 @@ def plot_nutrition_pie(data):
 
 def plot_radar(name, trend):
     vals=[3,2,1,1,2]
-    # 简单的模拟逻辑
+    # 模拟逻辑
     if "酸奶" in name: vals=[3,4,1,0,2]
     elif "咖啡" in name: vals=[2,3,5,0,1]
-    elif "茶" in name: vals=[1,2,4,0,3]
     
     # 趋势微调
     if "0糖" in trend: vals[0] = 1
@@ -161,7 +160,7 @@ st.sidebar.caption("食品硕士的数字化解决方案")
 app_mode = st.sidebar.selectbox("工作模式", ["🔬 R&D 研发中心", "🎬 自媒体工厂", "🗄️ 数据库", "⚙️ 云端监控"])
 
 # --------------------------------------------------
-#  MODE 1: R&D 研发中心 (合规增强版)
+#  MODE 1: R&D 研发中心
 # --------------------------------------------------
 if app_mode == "🔬 R&D 研发中心":
     st.title("🔬 智能研发与法规助手")
@@ -171,7 +170,7 @@ if app_mode == "🔬 R&D 研发中心":
     model_choice = st.sidebar.radio("模型", ["🚀 V3 极速版", "🧠 R1 深度思考"], 0)
     current_model = "reasoner" if "R1" in model_choice else "chat"
 
-    # --- 防幻觉第一道防线：严谨的 System Prompt ---
+    # 防幻觉 Prompt
     strict_prompt = """
     你是一名严谨的食品法规合规专家。核心原则：【依据事实，拒绝幻觉】。
     1. 引用标准：回答合规问题时，必须明确引用具体标准号（如 GB 2760-2024）。
@@ -188,29 +187,27 @@ if app_mode == "🔬 R&D 研发中心":
         st.sidebar.markdown("---")
         report = generate_eln(st.session_state["msg_law"])
         st.sidebar.download_button("📥 导出 MD 报告", report, "ELN.md")
-        if st.sidebar.button("💾 归档对话到库"):
+        if st.sidebar.button("💾 归档对话"):
             q = next((m['content'] for m in st.session_state["msg_law"] if m['role']=='user'), "记录")
             save_to_db("ELN", f"对话: {q[:10]}", report)
 
     # 5大功能区
-    tabs = st.tabs(["💬 法规对话(防幻觉)", "🧪 智能配方", "📸 视觉分析", "📄 文档Chat", "📊 新品概念"])
+    tabs = st.tabs(["💬 法规对话", "🧪 智能配方", "📸 视觉分析", "📄 文档Chat", "📊 新品概念"])
 
-    # --- Tab 1: 法规对话 (含人工核实链接) ---
+    # --- Tab 1: 法规对话 ---
     with tabs[0]:
         for m in st.session_state["msg_law"]:
             if m['role']!='system':
                 with st.chat_message(m['role']):
                     if "reasoning" in m: st.expander("🧠 深度思考链").markdown(m["reasoning"])
                     st.markdown(m['content'])
-                    
-                    # --- 防幻觉第三道防线：人工核实按钮 (仅在AI回答后显示) ---
                     if m['role'] == 'assistant':
-                        st.caption("🛡️ 合规提示：AI 结论仅供参考，请点击下方链接进行最终核实：")
+                        st.caption("🛡️ 人工核实链接：")
                         c1, c2 = st.columns(2)
-                        with c1: st.link_button("🔗 食品伙伴网 (查标准)", "http://www.foodmate.net/standards/")
-                        with c2: st.link_button("🔗 卫健委 (查公告)", "https://ssp.nhc.gov.cn/database/standards/list.html")
+                        with c1: st.link_button("🔗 食品伙伴网", "http://www.foodmate.net/standards/")
+                        with c2: st.link_button("🔗 卫健委", "https://ssp.nhc.gov.cn/database/standards/list.html")
 
-        if p:=st.chat_input("输入合规问题 (例如: 山梨酸钾在果冻中的限量)"):
+        if p:=st.chat_input("输入合规问题"):
             st.session_state["msg_law"].append({"role":"user","content":p})
             with st.chat_message("user"): st.markdown(p)
             with st.chat_message("assistant"):
@@ -218,18 +215,17 @@ if app_mode == "🔬 R&D 研发中心":
                     r, a = call_deepseek_advanced(st.session_state["msg_law"], current_model)
                 if r: st.expander("🧠 深度思考链").markdown(r)
                 st.markdown(a)
-                st.caption("🛡️ 合规提示：AI 结论仅供参考，请点击下方链接进行最终核实：")
+                st.caption("🛡️ 人工核实链接：")
                 c1, c2 = st.columns(2)
-                with c1: st.link_button("🔗 食品伙伴网 (查标准)", f"http://www.foodmate.net/search.php?kw={p}")
-                with c2: st.link_button("🔗 卫健委 (查公告)", "https://ssp.nhc.gov.cn/database/standards/list.html")
-                
+                with c1: st.link_button("🔗 食品伙伴网", f"http://www.foodmate.net/search.php?kw={p}")
+                with c2: st.link_button("🔗 卫健委", "https://ssp.nhc.gov.cn/database/standards/list.html")
                 st.session_state["msg_law"].append({"role":"assistant","content":a,"reasoning":r})
 
     # --- Tab 2: 智能配方 ---
     with tabs[1]:
         st.subheader("🧪 智能配方计算器")
         txt = st.text_area("输入配方 (如: 生牛乳90%, 白砂糖10%)", height=100)
-        if st.button("🧮 计算与合规评估"):
+        if st.button("🧮 计算与评估"):
             with st.spinner("R1 正在逆向拆解配方..."):
                 sys = "你是一名配方工程师。请提取原料百分比，计算营养成分(蛋/脂/碳)，并进行GB2760合规预警。"
                 r, a = call_deepseek_advanced([{"role":"system","content":sys},{"role":"user","content":txt}], "reasoner")
@@ -239,7 +235,6 @@ if app_mode == "🔬 R&D 研发中心":
                 st.markdown(a)
             with c2:
                 st.markdown("### 📊 预估营养分布")
-                # 模拟数据展示 (实际可让AI返回JSON)
                 st.plotly_chart(plot_nutrition_pie({"碳水":12,"蛋白":3.5,"脂肪":4,"水":80.5}))
             if st.button("💾 保存配方"): save_to_db("FORMULA", f"配方: {txt[:10]}", a)
 
@@ -256,10 +251,9 @@ if app_mode == "🔬 R&D 研发中心":
             st.session_state["msg_law"].append({"role":"user","content":f"[OCR]{txt}"})
             st.session_state["msg_law"].append({"role":"assistant","content":a})
 
-    # --- Tab 4: 文档 Chat (RAG) ---
+    # --- Tab 4: 文档 Chat ---
     with tabs[3]:
-        st.subheader("📄 文档深度问答 (防幻觉最佳实践)")
-        st.info("💡 提示：上传标准原文进行提问，是消除 AI 幻觉的最有效手段。")
+        st.subheader("📄 文档深度问答")
         fs = st.file_uploader("上传PDF", "pdf", True)
         if fs and st.button("📥 读取"):
             st.session_state["doc_c"] = extract_pdf(fs)
@@ -275,71 +269,83 @@ if app_mode == "🔬 R&D 研发中心":
                 st.chat_message("assistant").markdown(a)
                 st.session_state["doc_m"].append({"role":"assistant","content":a})
 
-    # --- Tab 5: 新品概念 (🔥 修复确认：完整输入项) ---
+    # --- Tab 5: 新品概念 (🔥 选项已完全恢复) ---
     with tabs[4]:
         st.subheader("💡 新品概念生成器")
-        # 恢复完整布局
         col1, col2 = st.columns(2)
-        with col1:
-            base_product = st.text_input("基底产品", "0糖酸奶")
-        with col2:
-            target_user = st.text_input("目标人群", "减脂打工人")
-            
+        with col1: base_product = st.text_input("基底产品", "0糖酸奶")
+        with col2: target_user = st.text_input("目标人群", "减脂打工人")
         trend = st.selectbox("结合趋势", ["药食同源", "0糖0卡", "高蛋白", "助眠/解压", "清洁标签"])
         
-        if st.button("🧪 生成概念书 & 风味雷达"):
-            # 恢复完整 Prompt
-            sys_prompt = "生成食品新品概念书，Markdown格式，包含卖点、配料、风味、包装建议。"
+        if st.button("🧪 生成概念书"):
+            sys = "生成食品新品概念书，Markdown格式，包含卖点、配料、风味、包装建议。"
             req = f"基底：{base_product}，人群：{target_user}，趋势：{trend}"
-            
-            col_t, col_c = st.columns([3, 2])
-            with col_t:
-                res = call_deepseek_once(sys_prompt, req)
+            c_t, c_c = st.columns([3, 2])
+            with c_t:
+                res = call_deepseek_once(sys, req)
                 st.markdown(res)
-                # 自动保存按钮
-                if st.button("💾 保存此概念"):
-                    save_to_db("IDEA", f"概念: {base_product} x {trend}", res)
-            
-            with col_c:
-                st.markdown("#### 🧬 预估风味轮廓")
+                if st.button("💾 保存概念"): save_to_db("IDEA", f"概念: {base_product}", res)
+            with c_c:
                 st.plotly_chart(plot_radar(base_product, trend), use_container_width=True)
 
 # --------------------------------------------------
-#  MODE 2: 自媒体工厂
+#  MODE 2: 自媒体工厂 (🔥 选项已完全恢复)
 # --------------------------------------------------
 elif app_mode == "🎬 自媒体工厂":
     st.title("🎬 自动化内容工厂")
     t1, t2 = st.tabs(["📝 脚本", "🎙️ 配音"])
+    
+    # --- Tab 1: 脚本生成 ---
     with t1:
-        if st.button("刷新热搜"): st.cache_data.clear()
-        try:
-            hot = requests.get("https://top.baidu.com/board?tab=realtime", headers={"UA":"Mozilla/5.0"}).text
-            ts = [t.strip() for t in re.findall(r'ellipsis">(.*?)</div>', hot) if len(t)>4][:10]
-            sel = st.radio("热点", ts)
-        except: sel=None
-        top = st.text_input("选题", sel if sel else "")
-        if st.button("生成"):
-            s = call_deepseek_once(f"写脚本:{top}", "")
-            st.session_state["scr"] = s
-            st.rerun()
-        if "scr" in st.session_state:
-            st.markdown(st.session_state["scr"])
-            if st.button("💾 存脚本"): save_to_db("SCRIPT", top, st.session_state["scr"])
+        col_h, col_g = st.columns([1,2])
+        with col_h:
+            if st.button("🔄 刷新热搜"): st.cache_data.clear()
+            try:
+                hot = requests.get("https://top.baidu.com/board?tab=realtime", headers={"UA":"Mozilla/5.0"}).text
+                ts = [t.strip() for t in re.findall(r'ellipsis">(.*?)</div>', hot) if len(t)>4][:10]
+                sel = st.radio("选取热点", ts, index=None)
+            except: sel=None
+            
+        with col_g:
+            # 恢复完整的输入区
+            top = st.text_input("选题", sel if sel else "")
+            c1, c2 = st.columns(2)
+            with c1: 
+                script_type = st.selectbox("类型", ["辟谣粉碎机", "红黑榜测评", "行业内幕揭秘", "热点吃瓜解读"])
+            with c2: 
+                visual_style = st.selectbox("风格", ["实拍生活风", "宫崎骏动漫", "赛博朋克风", "微距美食"])
+            
+            if st.button("🚀 生成脚本"):
+                # 恢复完整的 Prompt 逻辑
+                prompt = f"我是食品科普博主。选题：{top}。类型：{script_type}。风格：{visual_style}。请输出Markdown分镜表格。"
+                s = call_deepseek_once(prompt, "")
+                st.session_state["scr"] = s
+                st.rerun()
+                
+            if "scr" in st.session_state:
+                st.markdown(st.session_state["scr"])
+                if st.button("💾 存脚本"): save_to_db("SCRIPT", top, st.session_state["scr"])
+
+    # --- Tab 2: 配音 ---
     with t2:
-        txt = st.text_area("文案")
-        if st.button("生成语音"):
-            try: st.audio(asyncio.run(generate_speech(txt, "zh-CN-YunxiNeural")))
-            except: st.error("Error")
+        st.subheader("🎙️ TTS 配音室")
+        txt = st.text_area("粘贴文案")
+        voice = st.selectbox("音色", ["zh-CN-YunxiNeural (男声-稳重)", "zh-CN-XiaoxiaoNeural (女声-亲切)", "zh-CN-YunjianNeural (男声-新闻)"])
+        if st.button("🎧 生成"):
+            try: st.audio(asyncio.run(generate_speech(txt, voice.split(" ")[0])))
+            except: st.error("生成失败，请检查网络")
 
 # --------------------------------------------------
 #  MODE 3: 数据库
 # --------------------------------------------------
 elif app_mode == "🗄️ 数据库":
     st.title("🗄️ 研发档案")
-    type_ = st.radio("筛选", ["全部","ELN","FORMULA","SCRIPT"], horizontal=True)
+    type_ = st.radio("筛选", ["全部","ELN","FORMULA","SCRIPT","IDEA"], horizontal=True)
     t = None if type_=="全部" else type_
     for r in get_history(t):
-        with st.expander(f"{r[4]} | [{r[1]}] {r[2]}"): st.markdown(r[3])
+        with st.expander(f"{r[4]} | [{r[1]}] {r[2]}"): 
+            st.markdown(r[3])
+            st.download_button("导出MD", r[3], f"{r[1]}.md")
 
 # --------------------------------------------------
 #  MODE 4: 云端监控
