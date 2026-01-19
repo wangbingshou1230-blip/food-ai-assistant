@@ -44,7 +44,7 @@ if not check_password():
     st.stop()
 
 # ==================================================
-#  数据库 (SQLite)
+#  数据库核心函数 (SQLite)
 # ==================================================
 DB_FILE = "food_master.db"
 
@@ -63,7 +63,7 @@ def save_to_db(type_, title, content):
               (type_, title, content, datetime.now().strftime("%Y-%m-%d %H:%M")))
     conn.commit()
     conn.close()
-    st.toast(f"✅ 已归档: {title}")
+    st.sidebar.success(f"✅ 已归档: {title[:10]}...")
 
 def get_history(type_=None):
     conn = sqlite3.connect(DB_FILE)
@@ -77,7 +77,7 @@ def get_history(type_=None):
 init_db()
 
 # ==================================================
-#  工具函数
+#  配置与工具函数
 # ==================================================
 if "DEEPSEEK_API_KEY" not in st.secrets:
     st.error("⚠️ Secrets 缺失 DEEPSEEK_API_KEY")
@@ -125,17 +125,21 @@ def extract_pdf(files):
         except: pass
     return c
 
-# 绘图函数：营养成分饼图
-def plot_nutrition_pie(nutrition_data):
-    labels = list(nutrition_data.keys())
-    values = list(nutrition_data.values())
-    fig = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.3)])
-    fig.update_layout(margin=dict(t=20, b=20, l=20, r=20), showlegend=True)
+def generate_eln(messages):
+    t = datetime.now().strftime("%Y-%m-%d %H:%M")
+    rpt = f"# ELN Report\nTime: {t}\n\n"
+    for m in messages:
+        if m['role']!='system': rpt += f"## {m['role']}\n{m['content']}\n\n"
+    return rpt
+
+# --- 图表函数 ---
+def plot_nutrition_pie(data):
+    fig = go.Figure(data=[go.Pie(labels=list(data.keys()), values=list(data.values()), hole=.3)])
+    fig.update_layout(margin=dict(t=20,b=20,l=20,r=20))
     return fig
 
-# 绘图函数：风味雷达
 def plot_radar(name, trend):
-    vals = [3,2,1,1,2]
+    vals=[3,2,1,1,2]
     if "酸奶" in name: vals=[3,4,1,0,2]
     if "0糖" in trend: vals[0]=1
     fig = go.Figure(go.Scatterpolar(r=vals, theta=['甜','酸','苦','咸','鲜'], fill='toself', name=name))
@@ -143,126 +147,138 @@ def plot_radar(name, trend):
     return fig
 
 # ==================================================
-#  主界面
+#  主界面逻辑
 # ==================================================
 st.sidebar.title("🧬 FoodMaster Pro")
 st.sidebar.caption("食品硕士的数字化解决方案")
 app_mode = st.sidebar.selectbox("工作模式", ["🔬 R&D 研发中心", "🎬 自媒体工厂", "🗄️ 数据库", "⚙️ 云端监控"])
 
-# ---------------- R&D 模块 ----------------
+# --------------------------------------------------
+#  MODE 1: R&D 研发中心 (合规增强版)
+# --------------------------------------------------
 if app_mode == "🔬 R&D 研发中心":
     st.title("🔬 智能研发与法规助手")
-    st.sidebar.markdown("---")
-    model = "reasoner" if "R1" in st.sidebar.radio("模型", ["🚀 V3", "🧠 R1"], 0) else "chat"
     
-    # 5个功能 Tab (新增: 智能配方)
-    tabs = st.tabs(["💬 法规对话", "🧪 智能配方设计", "📸 视觉分析", "📄 文档Chat", "📊 新品概念"])
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🧠 大脑配置")
+    model_choice = st.sidebar.radio("模型", ["🚀 V3 极速版", "🧠 R1 深度思考"], 0)
+    current_model = "reasoner" if "R1" in model_choice else "chat"
 
-    # Tab 1: 法规对话
+    # --- 防幻觉第一道防线：严谨的 System Prompt ---
+    strict_prompt = """
+    你是一名严谨的食品法规合规专家。核心原则：【依据事实，拒绝幻觉】。
+    1. 引用标准：回答合规问题时，必须明确引用具体标准号（如 GB 2760-2024）。
+    2. 保守回答：若不确定最新数值，请直接回答“需核实最新标准”，严禁编造。
+    3. 数据敏感：添加剂限量必须精确，不能模糊。
+    4. 思考过程：请先进行逻辑分析，再给出结论。
+    """
+    
+    if "msg_law" not in st.session_state:
+        st.session_state["msg_law"] = [{"role": "system", "content": strict_prompt}]
+
+    # 侧边栏保存
+    if len(st.session_state["msg_law"]) > 1:
+        st.sidebar.markdown("---")
+        report = generate_eln(st.session_state["msg_law"])
+        st.sidebar.download_button("📥 导出 MD 报告", report, "ELN.md")
+        if st.sidebar.button("💾 归档对话到库"):
+            q = next((m['content'] for m in st.session_state["msg_law"] if m['role']=='user'), "记录")
+            save_to_db("ELN", f"对话: {q[:10]}", report)
+
+    # 5大功能区
+    tabs = st.tabs(["💬 法规对话(防幻觉)", "🧪 智能配方", "📸 视觉分析", "📄 文档Chat", "📊 新品概念"])
+
+    # --- Tab 1: 法规对话 (含人工核实链接) ---
     with tabs[0]:
-        if "msg_law" not in st.session_state: st.session_state["msg_law"]=[{"role":"system","content":"资深法规专家"}]
         for m in st.session_state["msg_law"]:
             if m['role']!='system':
                 with st.chat_message(m['role']):
-                    if "reasoning" in m: st.expander("🧠 思维链").markdown(m["reasoning"])
+                    if "reasoning" in m: st.expander("🧠 深度思考链").markdown(m["reasoning"])
                     st.markdown(m['content'])
-        if p:=st.chat_input("合规提问"):
+                    
+                    # --- 防幻觉第三道防线：人工核实按钮 (仅在AI回答后显示) ---
+                    if m['role'] == 'assistant':
+                        st.caption("🛡️ 合规提示：AI 结论仅供参考，请点击下方链接进行最终核实：")
+                        c1, c2 = st.columns(2)
+                        with c1: st.link_button("🔗 食品伙伴网 (查标准)", "http://www.foodmate.net/standards/")
+                        with c2: st.link_button("🔗 卫健委 (查公告)", "https://ssp.nhc.gov.cn/database/standards/list.html")
+
+        if p:=st.chat_input("输入合规问题 (例如: 山梨酸钾在果冻中的限量)"):
             st.session_state["msg_law"].append({"role":"user","content":p})
             with st.chat_message("user"): st.markdown(p)
             with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    r, a = call_deepseek_advanced(st.session_state["msg_law"], model)
-                if r: st.expander("思维链").markdown(r)
+                with st.spinner("AI 正在严谨检索与推理..."):
+                    r, a = call_deepseek_advanced(st.session_state["msg_law"], current_model)
+                if r: st.expander("🧠 深度思考链").markdown(r)
                 st.markdown(a)
+                st.caption("🛡️ 合规提示：AI 结论仅供参考，请点击下方链接进行最终核实：")
+                c1, c2 = st.columns(2)
+                with c1: st.link_button("🔗 食品伙伴网 (查标准)", f"http://www.foodmate.net/search.php?kw={p}")
+                with c2: st.link_button("🔗 卫健委 (查公告)", "https://ssp.nhc.gov.cn/database/standards/list.html")
+                
                 st.session_state["msg_law"].append({"role":"assistant","content":a,"reasoning":r})
-        # 侧边栏保存
-        if len(st.session_state["msg_law"])>1:
-            if st.sidebar.button("💾 保存对话"):
-                save_to_db("ELN", f"对话: {st.session_state['msg_law'][1]['content'][:10]}", str(st.session_state["msg_law"]))
 
-    # Tab 2: 智能配方设计 (NEW!)
+    # --- Tab 2: 智能配方 ---
     with tabs[1]:
         st.subheader("🧪 智能配方计算器")
-        st.info("输入原料及百分比，AI 自动进行营养拆解与合规验算。")
-        
-        formula_input = st.text_area("输入配方 (例如: 生牛乳 85%, 白砂糖 10%, 浓缩乳清蛋白 4%, 果胶 0.8%, 山梨酸钾 0.2%)", height=100)
-        
-        if st.button("🧮 开始计算与评估"):
-            if not formula_input:
-                st.warning("请先输入配方")
-            else:
-                with st.spinner("AI 正在逆向拆解配方并查询法规库..."):
-                    # 1. 结构化处理 Prompt
-                    sys_prompt = """
-                    你是一名食品配方工程师。请分析用户的配方文本。
-                    1. 【表格数据】：提取原料名称和百分比，并预估每种原料的 蛋白质/脂肪/碳水 含量(g/100g)。
-                    2. 【营养汇总】：计算成品总的 蛋白质/脂肪/碳水 含量。
-                    3. 【合规预警】：检查添加剂是否超标（基于GB2760通用标准），指出风险。
-                    
-                    输出格式要求：
-                    先输出Markdown表格，再输出 '### 营养分析'，最后输出 '### 合规报告'。
-                    """
-                    r, a = call_deepseek_advanced([
-                        {"role": "system", "content": sys_prompt},
-                        {"role": "user", "content": formula_input}
-                    ], "reasoner") # 必须用 R1 进行计算推理
-                
-                # 2. 展示结果
-                c1, c2 = st.columns([3, 2])
-                with c1:
-                    if r: st.expander("🧠 配方计算逻辑 (CoT)").markdown(r)
-                    st.markdown(a)
-                
-                with c2:
-                    # 3. 尝试提取数据画图 (简单正则提取AI回复中的总营养)
-                    # 这里做个简单的模拟解析，实际项目可以让AI返回JSON
-                    st.markdown("### 📊 预估营养构成")
-                    # 模拟数据 (实际应从AI结果提取)
-                    mock_data = {"碳水化合物": 12.0, "蛋白质": 3.8, "脂肪": 3.5, "水/其他": 80.7}
-                    st.plotly_chart(plot_nutrition_pie(mock_data), use_container_width=True)
-                    st.caption("*注：图表数据为模型估算值，仅供参考")
+        txt = st.text_area("输入配方 (如: 生牛乳90%, 白砂糖10%)", height=100)
+        if st.button("🧮 计算与合规评估"):
+            with st.spinner("R1 正在逆向拆解配方..."):
+                sys = "你是一名配方工程师。请提取原料百分比，计算营养成分(蛋/脂/碳)，并进行GB2760合规预警。"
+                r, a = call_deepseek_advanced([{"role":"system","content":sys},{"role":"user","content":txt}], "reasoner")
+            c1, c2 = st.columns([3, 2])
+            with c1:
+                if r: st.expander("计算逻辑").markdown(r)
+                st.markdown(a)
+            with c2:
+                st.markdown("### 📊 预估营养分布")
+                # 模拟数据展示 (实际可让AI返回JSON)
+                st.plotly_chart(plot_nutrition_pie({"碳水":12,"蛋白":3.5,"脂肪":4,"水":80.5}))
+            if st.button("💾 保存配方"): save_to_db("FORMULA", f"配方: {txt[:10]}", a)
 
-                # 保存按钮
-                if st.button("💾 保存配方报告"):
-                    save_to_db("FORMULA", f"配方: {formula_input[:10]}", a)
-
-    # Tab 3: 视觉分析
+    # --- Tab 3: 视觉分析 ---
     with tabs[2]:
-        f = st.file_uploader("配方表图片", ["jpg","png"])
-        if f and st.button("识别"):
+        st.subheader("📸 配料表风险扫描 (OCR)")
+        f = st.file_uploader("上传图片", ["jpg","png"])
+        if f and st.button("👁️ 识别"):
             txt = ocr_image(f)
             st.code(txt)
-            r, a = call_deepseek_advanced([{"role":"user","content":f"分析配料风险:{txt}"}], "reasoner")
+            with st.spinner("R1 风险评估中..."):
+                r, a = call_deepseek_advanced([{"role":"user","content":f"分析配料表风险:{txt}"}], "reasoner")
             st.markdown(a)
             st.session_state["msg_law"].append({"role":"user","content":f"[OCR]{txt}"})
             st.session_state["msg_law"].append({"role":"assistant","content":a})
 
-    # Tab 4: 文档Chat
+    # --- Tab 4: 文档 Chat (RAG) ---
     with tabs[3]:
+        st.subheader("📄 文档深度问答 (防幻觉最佳实践)")
+        st.info("💡 提示：上传标准原文进行提问，是消除 AI 幻觉的最有效手段。")
         fs = st.file_uploader("上传PDF", "pdf", True)
-        if fs and st.button("读取"):
+        if fs and st.button("📥 读取"):
             st.session_state["doc_c"] = extract_pdf(fs)
-            st.session_state["doc_m"] = [{"role":"system","content":f"基于:{st.session_state['doc_c'][:8000]}"}]
-            st.success("OK")
+            st.session_state["doc_m"] = [{"role":"system","content":f"严格基于以下内容回答:\n{st.session_state['doc_c'][:8000]}"}]
+            st.success("读取完成")
         if "doc_m" in st.session_state:
             for m in st.session_state["doc_m"]:
                 if m['role']!='system': st.chat_message(m['role']).markdown(m['content'])
-            if p:=st.chat_input("问文档", key="doc"):
+            if p:=st.chat_input("基于文档提问", key="doc"):
                 st.session_state["doc_m"].append({"role":"user","content":p})
                 st.chat_message("user").markdown(p)
-                r,a=call_deepseek_advanced(st.session_state["doc_m"], model)
+                r, a = call_deepseek_advanced(st.session_state["doc_m"], current_model)
                 st.chat_message("assistant").markdown(a)
                 st.session_state["doc_m"].append({"role":"assistant","content":a})
 
-    # Tab 5: 新品概念
+    # --- Tab 5: 新品概念 ---
     with tabs[4]:
         b = st.text_input("基底", "酸奶")
-        if st.button("生成"):
+        if st.button("生成概念"):
             res = call_deepseek_once("生成概念书", b)
             st.markdown(res)
             st.plotly_chart(plot_radar(b, ""))
 
-# ---------------- 自媒体 ----------------
+# --------------------------------------------------
+#  MODE 2: 自媒体工厂
+# --------------------------------------------------
 elif app_mode == "🎬 自媒体工厂":
     st.title("🎬 自动化内容工厂")
     t1, t2 = st.tabs(["📝 脚本", "🎙️ 配音"])
@@ -281,23 +297,25 @@ elif app_mode == "🎬 自媒体工厂":
         if "scr" in st.session_state:
             st.markdown(st.session_state["scr"])
             if st.button("💾 存脚本"): save_to_db("SCRIPT", top, st.session_state["scr"])
-
     with t2:
         txt = st.text_area("文案")
         if st.button("生成语音"):
-            try:
-                st.audio(asyncio.run(generate_speech(txt, "zh-CN-YunxiNeural")))
+            try: st.audio(asyncio.run(generate_speech(txt, "zh-CN-YunxiNeural")))
             except: st.error("Error")
 
-# ---------------- 数据库 ----------------
+# --------------------------------------------------
+#  MODE 3: 数据库
+# --------------------------------------------------
 elif app_mode == "🗄️ 数据库":
     st.title("🗄️ 研发档案")
-    type_ = st.radio("类型", ["全部","ELN","FORMULA","SCRIPT"], horizontal=True)
+    type_ = st.radio("筛选", ["全部","ELN","FORMULA","SCRIPT"], horizontal=True)
     t = None if type_=="全部" else type_
     for r in get_history(t):
         with st.expander(f"{r[4]} | [{r[1]}] {r[2]}"): st.markdown(r[3])
 
-# ---------------- 监控 ----------------
+# --------------------------------------------------
+#  MODE 4: 云端监控
+# --------------------------------------------------
 elif app_mode == "⚙️ 云端监控":
     st.title("⚙️ 监控")
     if st.button("测试推送") and "BARK_SERVER" in st.secrets:
