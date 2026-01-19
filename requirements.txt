@@ -11,3 +11,6 @@ beautifulsoup4
 plotly
 beautifulsoup4
 edge-tts
+easyocr
+opencv-python-headless
+numpy

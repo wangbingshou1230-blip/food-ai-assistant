@@ -7,8 +7,11 @@ import plotly.graph_objects as go
 import edge_tts
 import asyncio
 import json
+import easyocr # 新增：OCR 库
+import numpy as np
 from datetime import datetime
 from io import BytesIO
+from PIL import Image # 用于处理上传的图片
 
 # --- 1. 页面基础配置 ---
 st.set_page_config(
@@ -48,7 +51,7 @@ if "DEEPSEEK_API_KEY" not in st.secrets:
     st.stop()
 API_KEY = st.secrets["DEEPSEEK_API_KEY"]
 
-# --- AI 调用 (支持 R1 思维链) ---
+# --- AI 调用 (支持 R1) ---
 def call_deepseek_advanced(messages, model_type="chat"):
     url = "https://api.deepseek.com/chat/completions"
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {API_KEY}"}
@@ -64,7 +67,7 @@ def call_deepseek_advanced(messages, model_type="chat"):
             res_json = response.json()
             message = res_json['choices'][0]['message']
             content = message.get('content', '')
-            reasoning = message.get('reasoning_content', '') # 获取思维链
+            reasoning = message.get('reasoning_content', '')
             return reasoning, content
         else:
             return None, f"Error: {response.status_code} - {response.text}"
@@ -88,32 +91,31 @@ async def generate_speech(text, voice):
     mp3_fp.seek(0)
     return mp3_fp
 
-# --- ELN 报告生成器 (新!) ---
+# --- OCR 核心函数 (新!) ---
+@st.cache_resource # 使用缓存，避免每次刷新都重新加载模型，这很关键！
+def load_ocr_reader():
+    # 加载简写中文(ch_sim)和英文(en)
+    return easyocr.Reader(['ch_sim', 'en'], gpu=False) # 云端通常只有CPU
+
+def ocr_image(uploaded_file):
+    """读取图片并提取文字"""
+    try:
+        reader = load_ocr_reader()
+        image = Image.open(uploaded_file)
+        # EasyOCR 需要 numpy 数组格式
+        image_np = np.array(image)
+        result = reader.readtext(image_np, detail=0) # detail=0 只返回文字列表
+        return " ".join(result)
+    except Exception as e:
+        return f"OCR 识别失败: {e}"
+
+# --- ELN 报告生成器 ---
 def generate_eln_report(messages, project_name="未命名项目"):
-    """将对话记录转换为格式化的 Markdown 实验报告"""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    report = f"# 🧬 FoodMaster ELN 实验记录\n"
-    report += f"**项目名称**: {project_name}\n"
-    report += f"**记录时间**: {timestamp}\n"
-    report += f"**记录人**: FoodMaster Pro User\n"
-    report += "---\n\n"
-    
+    report = f"# 🧬 FoodMaster ELN 实验记录\n**项目**: {project_name}\n**时间**: {timestamp}\n---\n\n"
     for msg in messages:
-        role = msg["role"]
-        content = msg["content"]
-        
-        if role == "system":
-            continue
-        elif role == "user":
-            report += f"## 🙋‍♂️ 提问/指令\n{content}\n\n"
-        elif role == "assistant":
-            # 尝试从 session state 找对应的思维链 (这里简化处理，直接输出回答)
-            # 如果要保存思维链，需要在 chat loop 里把思维链也存进 messages 或者单独的结构
-            # 这里我们假设 content 包含了回答
-            report += f"## 🤖 AI 分析结论\n{content}\n\n"
-            report += "---\n"
-            
+        if msg["role"] == "user": report += f"## 🙋‍♂️ 提问\n{msg['content']}\n\n"
+        elif msg["role"] == "assistant": report += f"## 🤖 回答\n{msg['content']}\n\n---\n"
     return report
 
 # --- 其他辅助 ---
@@ -139,7 +141,6 @@ def plot_sensory_radar(product_name, trend):
     categories = ['甜度', '酸度', '苦度', '咸度', '鲜度']
     values = [3, 2, 1, 1, 2]
     if "酸奶" in product_name: values = [3, 4, 1, 0, 2]
-    elif "咖啡" in product_name: values = [2, 3, 5, 0, 1]
     if "0糖" in trend: values[0] = 1
     fig = go.Figure()
     fig.add_trace(go.Scatterpolar(r=values, theta=categories, fill='toself', name=product_name, line_color='#FF4B4B'))
@@ -152,16 +153,15 @@ st.sidebar.caption("食品硕士的数字化解决方案")
 
 app_mode = st.sidebar.selectbox(
     "选择工作模式",
-    ["🔬 R&D 研发与合规 (R1推理版)", "🎬 自媒体内容矩阵", "⚙️ 云端数据看板"]
+    ["🔬 R&D 研发与合规 (Visual版)", "🎬 自媒体内容矩阵", "⚙️ 云端数据看板"]
 )
 
 # ==================================================
-# 模块 1: R&D 研发 (含 ELN 导出)
+# 模块 1: R&D 研发 (集成 Vision)
 # ==================================================
-if app_mode == "🔬 R&D 研发与合规 (R1推理版)":
+if app_mode == "🔬 R&D 研发与合规 (Visual版)":
     st.title("🔬 智能研发与法规助手")
     
-    # 侧边栏配置
     st.sidebar.markdown("---")
     st.sidebar.subheader("🧠 大脑配置")
     model_choice = st.sidebar.radio("选择模型", ["🚀 V3 极速版", "🧠 R1 深度思考"], index=0)
@@ -170,157 +170,155 @@ if app_mode == "🔬 R&D 研发与合规 (R1推理版)":
     if "messages_law" not in st.session_state:
         st.session_state["messages_law"] = [{"role": "system", "content": "你是一名资深的食品法规专员。"}]
     
-    # --- ELN 导出区 (侧边栏) ---
+    # ELN 导出
     st.sidebar.markdown("---")
-    st.sidebar.subheader("📂 电子实验记录 (ELN)")
     if len(st.session_state["messages_law"]) > 1:
-        st.sidebar.info(f"当前已记录 {len(st.session_state['messages_law'])-1} 条对话")
-        report_content = generate_eln_report(st.session_state["messages_law"], project_name="法规合规性审查项目")
-        st.sidebar.download_button(
-            label="📥 导出实验报告 (.md)",
-            data=report_content,
-            file_name=f"ELN_Report_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
-            mime="text/markdown"
-        )
-    else:
-        st.sidebar.caption("暂无对话记录可导出")
+        report = generate_eln_report(st.session_state["messages_law"])
+        st.sidebar.download_button("📥 导出实验报告", report, file_name="ELN.md")
 
-    tab1, tab2, tab3 = st.tabs(["💬 法规智能对话", "📄 智能文档 Chat", "📊 新品研发可视化"])
+    # 新增 Tab 4: 视觉配料分析
+    tab1, tab2, tab4, tab3 = st.tabs(["💬 法规对话", "📄 文档Chat", "📸 视觉配料分析 (OCR)", "📊 新品研发"])
 
+    # --- Tab 1: 法规对话 ---
     with tab1:
         for msg in st.session_state["messages_law"]:
             if msg["role"] != "system":
-                with st.chat_message(msg["role"]): 
-                    # 如果有思维链字段（这是我们自己加的标记），可以用 expander 显示
+                with st.chat_message(msg["role"]):
                     if "reasoning" in msg:
-                        with st.expander("🧠 查看历史思维链"):
-                            st.markdown(msg["reasoning"])
+                        with st.expander("🧠 思维链"): st.markdown(msg["reasoning"])
                     st.markdown(msg["content"])
         
-        if prompt := st.chat_input("输入合规问题..."):
+        if prompt := st.chat_input("输入问题..."):
             st.session_state["messages_law"].append({"role": "user", "content": prompt})
             with st.chat_message("user"): st.markdown(prompt)
-            
             with st.chat_message("assistant"):
-                status = "AI 思考中..." if current_model == "chat" else "R1 深度推理中..."
-                with st.spinner(status):
-                    reasoning, answer = call_deepseek_advanced(st.session_state["messages_law"], model_type=current_model)
+                with st.spinner("AI 思考中..."):
+                    r, a = call_deepseek_advanced(st.session_state["messages_law"], current_model)
+                if r: 
+                    with st.expander("🧠 思维链"): st.markdown(r)
+                st.markdown(a)
+                st.session_state["messages_law"].append({"role": "assistant", "content": a, "reasoning": r})
+            
+    # --- Tab 4: 视觉配料分析 (核心新功能) ---
+    with tab4:
+        st.subheader("📸 视觉配料表分析 (AI Vision)")
+        st.info("场景：上传食品包装/配料表照片，AI 自动提取文字并分析潜在风险。")
+        
+        img_file = st.file_uploader("上传图片 (JPG/PNG)", type=["jpg", "png", "jpeg"])
+        
+        if img_file:
+            # 显示图片
+            st.image(img_file, caption="上传的图片", width=300)
+            
+            if st.button("👁️ 开始识别并分析"):
+                with st.spinner("🔍 正在进行 OCR 文字提取 (首次运行可能较慢)..."):
+                    # 1. 提取文字
+                    extracted_text = ocr_image(img_file)
                 
-                # 记录思维链到历史（为了导出时能看到，虽然generate_eln_report目前还没完美解析它，但我们可以先存着）
-                msg_data = {"role": "assistant", "content": answer}
-                
-                if reasoning:
-                    with st.expander("🧠 深度思考过程"): st.markdown(reasoning)
-                    msg_data["reasoning"] = reasoning # 把思维链存入消息对象
-                
-                st.markdown(answer)
-                st.session_state["messages_law"].append(msg_data)
+                if extracted_text and "失败" not in extracted_text:
+                    st.success("✅ 文字提取成功！")
+                    with st.expander("查看提取到的原始文字"):
+                        st.code(extracted_text)
+                    
+                    # 2. 交给 AI 分析
+                    with st.spinner("🧠 R1 正在深度分析配料表..."):
+                        sys_prompt = """
+                        你是一名食品安全专家。用户会提供一段从食品包装上识别出的文字（可能包含乱码）。
+                        请做以下分析：
+                        1. 【整理】：修正OCR识别错误的食品添加剂名称。
+                        2. 【风险】：指出是否含有致敏原、反式脂肪酸或受争议的添加剂。
+                        3. 【评价】：基于配料表判断该产品的加工加工程度（清洁标签程度）。
+                        """
+                        # 这里强制使用 R1 进行深度推理，因为分析配料表需要逻辑
+                        r, a = call_deepseek_advanced([
+                            {"role": "system", "content": sys_prompt},
+                            {"role": "user", "content": f"识别到的配料表内容：{extracted_text}"}
+                        ], model_type="reasoner")
+                        
+                        if r:
+                            with st.expander("🧠 AI 分析逻辑"): st.markdown(r)
+                        st.markdown("### 🥗 配料表深度分析报告")
+                        st.markdown(a)
+                        
+                        # 自动存入对话历史，方便导出 ELN
+                        st.session_state["messages_law"].append({
+                            "role": "user", 
+                            "content": f"[图片分析] 配料表内容：{extracted_text}"
+                        })
+                        st.session_state["messages_law"].append({
+                            "role": "assistant", 
+                            "content": a,
+                            "reasoning": r
+                        })
+                else:
+                    st.error(extracted_text)
 
-        if st.button("🗑️ 清空对话"):
-            st.session_state["messages_law"] = [{"role": "system", "content": "你是一名资深的食品法规专员。"}]
-            st.rerun()
-
-    with tab2: # 文档对话 (简化版)
-        st.subheader("📄 智能文档对话")
-        uploaded_files = st.file_uploader("上传 PDF", type="pdf", accept_multiple_files=True)
-        if "pdf_context" not in st.session_state: st.session_state["pdf_context"] = ""
-        if "messages_doc" not in st.session_state: st.session_state["messages_doc"] = []
-
-        if uploaded_files and st.button("📥 读取"):
-            content = ""
-            for f in uploaded_files: content += f"\n--- {f.name} ---\n{extract_text_from_pdf(f)}\n"
-            st.session_state["pdf_context"] = content
-            st.session_state["messages_doc"] = [{"role": "system", "content": f"基于内容回答:\n{content[:8000]}"}]
+    # --- Tab 2: 文档对话 ---
+    with tab2:
+        st.subheader("📄 文档对话")
+        uploaded_files = st.file_uploader("上传PDF", type="pdf", accept_multiple_files=True)
+        if uploaded_files and st.button("读取"):
+            c = ""
+            for f in uploaded_files: c += f"\n--- {f.name} ---\n{extract_text_from_pdf(f)}\n"
+            st.session_state["pdf_context"] = c
+            st.session_state["messages_doc"] = [{"role":"system","content":f"内容:\n{c[:8000]}"}]
             st.success("读取完成")
-
-        if st.session_state["pdf_context"]:
+        
+        if "messages_doc" in st.session_state:
             for m in st.session_state["messages_doc"]:
                 if m["role"]!="system":
                     with st.chat_message(m["role"]): st.markdown(m["content"])
-            if p := st.chat_input("问文档..."):
-                st.session_state["messages_doc"].append({"role":"user", "content":p})
+            if p:=st.chat_input("问文档", key="doc_chat"):
+                st.session_state["messages_doc"].append({"role":"user","content":p})
                 with st.chat_message("user"): st.markdown(p)
-                # 这里也可以用 R1
-                r, a = call_deepseek_advanced(st.session_state["messages_doc"], model_type=current_model)
-                with st.chat_message("assistant"):
-                    if r: 
-                        with st.expander("逻辑"): st.markdown(r)
-                    st.markdown(a)
-                st.session_state["messages_doc"].append({"role":"assistant", "content":a})
+                r, a = call_deepseek_advanced(st.session_state["messages_doc"], current_model)
+                with st.chat_message("assistant"): st.markdown(a)
+                st.session_state["messages_doc"].append({"role":"assistant","content":a})
 
-    with tab3: # 新品研发
-        st.subheader("💡 新品概念生成")
-        c1, c2 = st.columns(2)
-        with c1: base = st.text_input("基底", "0糖酸奶")
-        with c2: user = st.text_input("人群", "减脂党")
-        trend = st.selectbox("趋势", ["药食同源", "0糖0卡"])
+    # --- Tab 3: 新品研发 ---
+    with tab3:
+        st.subheader("💡 新品概念")
+        c1,c2=st.columns(2)
+        with c1: base=st.text_input("基底","0糖酸奶")
+        with c2: user=st.text_input("人群","减脂党")
+        trend=st.selectbox("趋势",["药食同源","0糖"])
         if st.button("生成"):
             col_t, col_c = st.columns([3, 2])
             with col_t: st.markdown(call_deepseek_once("生成概念书", f"{base} {user} {trend}"))
             with col_c: st.plotly_chart(plot_sensory_radar(base, trend))
 
 # ==================================================
-# 模块 2: 自媒体 (含脚本导出)
+# 模块 2: 自媒体
 # ==================================================
 elif app_mode == "🎬 自媒体内容矩阵":
     st.title("🎬 自动化内容生产工厂")
-    tab_script, tab_voice = st.tabs(["📝 智能脚本生成", "🎙️ AI 配音室 (TTS)"])
-
+    tab_script, tab_voice = st.tabs(["📝 脚本生成", "🎙️ AI配音"])
     with tab_script:
-        col_hot, col_gen = st.columns([1, 2])
-        with col_hot:
-            if st.button("🔄 刷新"): st.cache_data.clear()
-            hot_list = get_realtime_news()
-            sel = st.radio("热点", hot_list, index=None)
-            if sel: st.session_state['sel_topic'] = sel
-
-        with col_gen:
-            topic = st.text_input("选题", value=st.session_state.get('sel_topic', ''))
-            c1, c2 = st.columns(2)
-            with c1: type_ = st.selectbox("类型", ["辟谣", "测评"])
-            with c2: style = st.selectbox("风格", ["实拍", "动漫"])
-            
-            # 使用 session_state 存储生成的脚本，防止刷新消失
-            if "generated_script" not in st.session_state:
-                st.session_state["generated_script"] = ""
-
-            if st.button("🚀 生成分镜脚本"):
-                if topic:
-                    prompt = f"我是科普博主。选题：{topic}。类型：{type_}。风格：{style}。输出Markdown分镜表。"
-                    script = call_deepseek_once(prompt, topic)
-                    st.session_state["generated_script"] = script
-                    st.rerun() # 刷新页面以显示下载按钮
-
-            if st.session_state["generated_script"]:
-                st.markdown(st.session_state["generated_script"])
-                st.download_button(
-                    label="📥 下载脚本文件 (.md)",
-                    data=st.session_state["generated_script"],
-                    file_name=f"Script_{datetime.now().strftime('%Y%m%d')}.md",
-                    mime="text/markdown"
-                )
-
+        col_h, col_g = st.columns([1,2])
+        with col_h:
+            if st.button("刷新"): st.cache_data.clear()
+            hot=get_realtime_news()
+            sel=st.radio("热点",hot,index=None)
+            if sel: st.session_state['sel']=sel
+        with col_g:
+            top=st.text_input("选题",st.session_state.get('sel',''))
+            if st.button("生成脚本"):
+                st.markdown(call_deepseek_once(f"写脚本，选题：{top}",""))
     with tab_voice:
-        st.subheader("🎙️ AI 配音室")
-        txt = st.text_area("粘贴文案", height=150)
-        voice = st.selectbox("音色", ["zh-CN-YunxiNeural (男)", "zh-CN-XiaoxiaoNeural (女)"])
-        if st.button("🎧 生成"):
-            if txt:
-                try:
-                    mp3 = asyncio.run(generate_speech(txt, voice.split(" ")[0]))
-                    st.audio(mp3)
-                    st.success("生成成功")
-                except: st.error("失败")
+        txt=st.text_area("文案")
+        if st.button("生成语音"):
+            try:
+                mp3=asyncio.run(generate_speech(txt,"zh-CN-YunxiNeural"))
+                st.audio(mp3)
+            except: st.error("失败")
 
 # ==================================================
 # 模块 3: 云端看板
 # ==================================================
 elif app_mode == "⚙️ 云端数据看板":
     st.title("⚙️ 自动化系统监控")
-    st.info("云端任务：daily_task.py 正在 GitHub 服务器上每日 08:00 运行")
-    if st.button("📲 测试推送"):
+    st.info("daily_task.py 每日 08:00 运行")
+    if st.button("测试推送"):
         if "BARK_SERVER" in st.secrets:
-            try:
-                requests.get(f"{st.secrets['BARK_SERVER']}/{st.secrets['BARK_DEVICE_KEY']}/测试/网页端指令")
-                st.success("✅ 推送成功")
-            except: st.error("失败")
+            requests.get(f"{st.secrets['BARK_SERVER']}/{st.secrets['BARK_DEVICE_KEY']}/测试")
+            st.success("已发送")
