@@ -140,8 +140,15 @@ def plot_nutrition_pie(data):
 
 def plot_radar(name, trend):
     vals=[3,2,1,1,2]
+    # 简单的模拟逻辑
     if "酸奶" in name: vals=[3,4,1,0,2]
-    if "0糖" in trend: vals[0]=1
+    elif "咖啡" in name: vals=[2,3,5,0,1]
+    elif "茶" in name: vals=[1,2,4,0,3]
+    
+    # 趋势微调
+    if "0糖" in trend: vals[0] = 1
+    if "高蛋白" in trend: vals[4] += 1
+    
     fig = go.Figure(go.Scatterpolar(r=vals, theta=['甜','酸','苦','咸','鲜'], fill='toself', name=name))
     fig.update_layout(polar=dict(radialaxis=dict(range=[0,5])), margin=dict(t=20,b=20,l=30,r=30))
     return fig
@@ -268,13 +275,34 @@ if app_mode == "🔬 R&D 研发中心":
                 st.chat_message("assistant").markdown(a)
                 st.session_state["doc_m"].append({"role":"assistant","content":a})
 
-    # --- Tab 5: 新品概念 ---
+    # --- Tab 5: 新品概念 (🔥 修复确认：完整输入项) ---
     with tabs[4]:
-        b = st.text_input("基底", "酸奶")
-        if st.button("生成概念"):
-            res = call_deepseek_once("生成概念书", b)
-            st.markdown(res)
-            st.plotly_chart(plot_radar(b, ""))
+        st.subheader("💡 新品概念生成器")
+        # 恢复完整布局
+        col1, col2 = st.columns(2)
+        with col1:
+            base_product = st.text_input("基底产品", "0糖酸奶")
+        with col2:
+            target_user = st.text_input("目标人群", "减脂打工人")
+            
+        trend = st.selectbox("结合趋势", ["药食同源", "0糖0卡", "高蛋白", "助眠/解压", "清洁标签"])
+        
+        if st.button("🧪 生成概念书 & 风味雷达"):
+            # 恢复完整 Prompt
+            sys_prompt = "生成食品新品概念书，Markdown格式，包含卖点、配料、风味、包装建议。"
+            req = f"基底：{base_product}，人群：{target_user}，趋势：{trend}"
+            
+            col_t, col_c = st.columns([3, 2])
+            with col_t:
+                res = call_deepseek_once(sys_prompt, req)
+                st.markdown(res)
+                # 自动保存按钮
+                if st.button("💾 保存此概念"):
+                    save_to_db("IDEA", f"概念: {base_product} x {trend}", res)
+            
+            with col_c:
+                st.markdown("#### 🧬 预估风味轮廓")
+                st.plotly_chart(plot_radar(base_product, trend), use_container_width=True)
 
 # --------------------------------------------------
 #  MODE 2: 自媒体工厂
