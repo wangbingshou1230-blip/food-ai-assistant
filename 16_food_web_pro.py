@@ -9,7 +9,7 @@ import asyncio
 import json
 import easyocr
 import numpy as np
-import sqlite3 # 新增：数据库标准库
+import sqlite3
 from datetime import datetime
 from io import BytesIO
 from PIL import Image
@@ -44,40 +44,36 @@ if not check_password():
     st.stop()
 
 # ==================================================
-#  数据库核心函数 (SQLite) - 新增模块
+#  数据库核心函数 (SQLite)
 # ==================================================
 DB_FILE = "food_master.db"
 
 def init_db():
-    """初始化数据库表结构"""
+    """初始化数据库"""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    # 创建一个通用的记录表
     c.execute('''
         CREATE TABLE IF NOT EXISTS records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            type TEXT,      -- 类型: ELN / SCRIPT
-            title TEXT,     -- 标题
-            content TEXT,   -- 内容详情
-            timestamp TEXT  -- 时间
+            type TEXT, title TEXT, content TEXT, timestamp TEXT
         )
     ''')
     conn.commit()
     conn.close()
 
 def save_to_db(record_type, title, content):
-    """保存一条记录"""
+    """保存记录"""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    t = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     c.execute("INSERT INTO records (type, title, content, timestamp) VALUES (?, ?, ?, ?)",
-              (record_type, title, content, timestamp))
+              (record_type, title, content, t))
     conn.commit()
     conn.close()
-    st.success(f"✅ 已归档: {title}")
+    st.sidebar.success(f"✅ 已归档: {title[:10]}...")
 
 def get_history(record_type=None):
-    """获取历史记录"""
+    """获取历史"""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     if record_type:
@@ -88,7 +84,6 @@ def get_history(record_type=None):
     conn.close()
     return data
 
-# 初始化数据库
 init_db()
 
 # ==================================================
@@ -143,24 +138,48 @@ def generate_eln(messages):
         if m['role']!='system': rpt += f"## {m['role']}\n{m['content']}\n\n"
     return rpt
 
+# 恢复完整的雷达图逻辑
+def plot_sensory_radar(product_name, trend):
+    categories = ['甜度', '酸度', '苦度', '咸度', '鲜度']
+    values = [3, 2, 1, 1, 2] # 默认
+    if "酸奶" in product_name: values = [3, 4, 1, 0, 2]
+    elif "咖啡" in product_name: values = [2, 3, 5, 0, 1]
+    elif "茶" in product_name: values = [1, 2, 4, 0, 3]
+    
+    if "0糖" in trend: values[0] = 1 # 降甜
+    if "高蛋白" in trend: values[4] += 1 # 提鲜/厚度
+    
+    fig = go.Figure()
+    fig.add_trace(go.Scatterpolar(r=values, theta=categories, fill='toself', name=product_name, line_color='#FF4B4B'))
+    fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 5])), showlegend=False, margin=dict(t=20, b=20, l=40, r=40))
+    return fig
+
+def extract_text_from_pdf(file):
+    try:
+        with pdfplumber.open(file) as pdf:
+            text = ""
+            for page in pdf.pages[:5]: text += page.extract_text() + "\n"
+            return text
+    except: return ""
+
 # --- 侧边栏 ---
 st.sidebar.title("🧬 FoodMaster Pro")
 st.sidebar.caption("食品硕士的数字化解决方案")
 
-# 新增 "历史档案库" 模式
 app_mode = st.sidebar.selectbox(
     "选择工作模式",
     ["🔬 R&D 研发与合规", "🎬 自媒体内容矩阵", "🗄️ 历史档案库 (Database)", "⚙️ 云端数据看板"]
 )
 
 # ==================================================
-# 模块 1: R&D 研发 (含数据库保存)
+# 模块 1: R&D 研发 (全功能恢复版)
 # ==================================================
 if app_mode == "🔬 R&D 研发与合规":
     st.title("🔬 智能研发与法规助手")
     
-    st.sidebar.subheader("🧠 配置")
-    model_choice = st.sidebar.radio("模型", ["🚀 V3", "🧠 R1"], 0)
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🧠 大脑配置")
+    model_choice = st.sidebar.radio("模型选择", ["🚀 V3 极速版", "🧠 R1 深度思考"], 0)
     current_model = "reasoner" if "R1" in model_choice else "chat"
 
     if "messages_law" not in st.session_state:
@@ -170,129 +189,171 @@ if app_mode == "🔬 R&D 研发与合规":
     st.sidebar.markdown("---")
     if len(st.session_state["messages_law"]) > 1:
         report = generate_eln(st.session_state["messages_law"])
-        # 1. 下载文件
-        st.sidebar.download_button("📥 下载 ELN 文件", report, "ELN.md")
-        # 2. 保存到数据库 (新功能)
-        if st.sidebar.button("💾 归档到数据库"):
-            # 提取第一个问题的缩写作为标题
-            first_q = next((m['content'] for m in st.session_state["messages_law"] if m['role']=='user'), "未命名记录")
-            title = f"R&D: {first_q[:15]}..."
-            save_to_db("ELN", title, report)
+        c1, c2 = st.sidebar.columns(2)
+        with c1: st.download_button("📥 导出MD", report, "ELN.md")
+        with c2: 
+            if st.button("💾 存入库"):
+                first_q = next((m['content'] for m in st.session_state["messages_law"] if m['role']=='user'), "记录")
+                save_to_db("ELN", f"R&D: {first_q[:10]}", report)
 
-    tab1, tab4, tab2, tab3 = st.tabs(["💬 对话", "📸 视觉分析", "📄 文档", "📊 新品"])
+    # 恢复完整的四个 Tab
+    tab1, tab4, tab2, tab3 = st.tabs(["💬 法规智能对话", "📸 视觉配料分析", "📄 智能文档 Chat", "📊 新品研发可视化"])
 
-    with tab1: # 对话
+    # --- Tab 1: 法规对话 ---
+    with tab1:
+        st.caption(f"当前模式: {model_choice}")
         for m in st.session_state["messages_law"]:
             if m["role"]!="system":
                 with st.chat_message(m["role"]):
-                    if "reasoning" in m: st.expander("思维链").markdown(m["reasoning"])
+                    if "reasoning" in m: st.expander("🧠 思维链").markdown(m["reasoning"])
                     st.markdown(m["content"])
-        if p:=st.chat_input("输入问题..."):
+        if p:=st.chat_input("输入合规问题..."):
             st.session_state["messages_law"].append({"role":"user","content":p})
             with st.chat_message("user"): st.markdown(p)
             with st.chat_message("assistant"):
-                with st.spinner("AI Thinking..."):
+                with st.spinner("AI 思考中..."):
                     r, a = call_deepseek_advanced(st.session_state["messages_law"], current_model)
-                if r: st.expander("思维链").markdown(r)
+                if r: st.expander("🧠 思维链").markdown(r)
                 st.markdown(a)
                 st.session_state["messages_law"].append({"role":"assistant","content":a,"reasoning":r})
 
-    with tab4: # 视觉
-        st.subheader("📸 配料表分析")
-        f = st.file_uploader("传图", ["jpg","png"])
-        if f and st.button("开始识别"):
-            with st.spinner("OCR识别中..."):
-                txt = ocr_image(f)
-            st.code(txt)
-            with st.spinner("R1分析中..."):
-                r, a = call_deepseek_advanced([{"role":"user","content":f"分析配料表风险:{txt}"}], "reasoner")
-            st.markdown(a)
-            # 自动存入对话以便保存
-            st.session_state["messages_law"].append({"role":"user","content":f"[OCR] {txt}"})
-            st.session_state["messages_law"].append({"role":"assistant","content":a,"reasoning":r})
+    # --- Tab 4: 视觉分析 (EasyOCR) ---
+    with tab4:
+        st.subheader("📸 配料表风险扫描")
+        f = st.file_uploader("上传配料表图片", ["jpg","png"])
+        if f:
+            st.image(f, width=300)
+            if st.button("👁️ 开始识别并分析"):
+                with st.spinner("OCR 识别中..."):
+                    txt = ocr_image(f)
+                st.code(txt)
+                
+                with st.spinner("R1 深度评估中..."):
+                    prompt = f"分析以下食品配料表，指出添加剂风险和清洁标签程度：\n{txt}"
+                    r, a = call_deepseek_advanced([{"role":"user","content":prompt}], "reasoner")
+                
+                if r: st.expander("🧠 分析逻辑").markdown(r)
+                st.markdown(a)
+                # 存入历史以便归档
+                st.session_state["messages_law"].append({"role":"user","content":f"[OCR] {txt}"})
+                st.session_state["messages_law"].append({"role":"assistant","content":a,"reasoning":r})
 
-    with tab2: # 文档 (略简写保持功能)
-        st.subheader("📄 文档")
-        fs = st.file_uploader("传PDF", "pdf", True)
-        if fs and st.button("读取"):
+    # --- Tab 2: 文档对话 (恢复完整逻辑) ---
+    with tab2:
+        st.subheader("📄 文档深度问答")
+        fs = st.file_uploader("上传 PDF (支持多选)", "pdf", True)
+        if fs and st.button("📥 读取文档"):
             c=""
             for f in fs: 
-                try:
-                    with pdfplumber.open(f) as pdf:
-                        for p in pdf.pages[:3]: c+=p.extract_text()
-                except: pass
+                c += f"\n--- {f.name} ---\n{extract_text_from_pdf(f)}\n"
             st.session_state["doc_c"] = c
-            st.success("OK")
-        if "doc_c" in st.session_state and (p:=st.chat_input("问文档", key="doc")):
-            st.write(f"问: {p}")
-            st.markdown(call_deepseek_once(f"基于:{st.session_state['doc_c'][:5000]}", p))
+            st.session_state["doc_msgs"] = [{"role":"system","content":f"基于内容回答:\n{c[:8000]}"}]
+            st.success(f"已读取 {len(fs)} 个文件")
+            
+        if "doc_msgs" in st.session_state:
+            for m in st.session_state["doc_msgs"]:
+                if m["role"]!="system":
+                    with st.chat_message(m["role"]): st.markdown(m["content"])
+            if p:=st.chat_input("问文档...", key="doc_input"):
+                st.session_state["doc_msgs"].append({"role":"user","content":p})
+                with st.chat_message("user"): st.markdown(p)
+                r, a = call_deepseek_advanced(st.session_state["doc_msgs"], current_model)
+                with st.chat_message("assistant"):
+                    if r: st.expander("逻辑").markdown(r)
+                    st.markdown(a)
+                st.session_state["doc_msgs"].append({"role":"assistant","content":a})
 
-    with tab3: # 新品
-        b = st.text_input("基底", "酸奶")
-        if st.button("生成"):
-            st.markdown(call_deepseek_once("生成概念书", b))
-            st.plotly_chart(go.Figure(go.Scatterpolar(r=[4,3,2,1,5], theta=['A','B','C','D','E'])))
+    # --- Tab 3: 新品研发 (恢复完整表单与图表) ---
+    with tab3:
+        st.subheader("💡 新品概念生成器")
+        c1, c2 = st.columns(2)
+        with c1: base = st.text_input("基底产品", "0糖酸奶")
+        with c2: user = st.text_input("目标人群", "减脂打工人")
+        trend = st.selectbox("结合趋势", ["药食同源", "0糖0卡", "高蛋白", "助眠/解压", "清洁标签"])
+        
+        if st.button("🧪 生成概念书 & 风味雷达"):
+            sys = "生成食品新品概念书，Markdown格式，包含卖点、配料、风味、包装建议。"
+            req = f"基底：{base}，人群：{user}，趋势：{trend}"
+            
+            col_t, col_c = st.columns([3, 2])
+            with col_t:
+                res = call_deepseek_once(sys, req)
+                st.markdown(res)
+                # 自动保存到 DB 的快捷按钮
+                if st.button("💾 保存此概念"):
+                    save_to_db("IDEA", f"概念: {base} x {trend}", res)
+            
+            with col_c:
+                st.markdown("#### 🧬 预估风味轮廓")
+                st.plotly_chart(plot_sensory_radar(base, trend), use_container_width=True)
 
 # ==================================================
-# 模块 2: 自媒体 (含数据库保存)
+# 模块 2: 自媒体内容矩阵
 # ==================================================
 elif app_mode == "🎬 自媒体内容矩阵":
-    st.title("🎬 内容工厂")
-    t1, t2 = st.tabs(["📝 脚本", "🎙️ 配音"])
+    st.title("🎬 自动化内容工厂")
+    t1, t2 = st.tabs(["📝 智能脚本", "🎙️ AI 配音"])
     
     with t1:
-        topic = st.text_input("选题")
-        if st.button("生成脚本"):
-            script = call_deepseek_once(f"写分镜脚本:{topic}", "")
-            st.session_state["last_script"] = script
-            st.markdown(script)
-        
-        # 数据库保存按钮
-        if "last_script" in st.session_state:
-            if st.button("💾 保存脚本到数据库"):
-                save_to_db("SCRIPT", f"脚本: {topic}", st.session_state["last_script"])
+        st.caption("从热点到脚本")
+        col_h, col_g = st.columns([1,2])
+        with col_h:
+            if st.button("🔄 刷新热搜"): st.cache_data.clear()
+            hot = requests.get("https://top.baidu.com/board?tab=realtime", headers={"User-Agent":"Mozilla/5.0"}).text
+            titles = re.findall(r'class="c-single-text-ellipsis">(.*?)</div>', hot)
+            clean_t = [t.strip() for t in titles if len(t)>4][:10]
+            sel = st.radio("选取热点", clean_t, index=None)
+            if sel: st.session_state['sel_topic'] = sel
+            
+        with col_g:
+            topic = st.text_input("选题", st.session_state.get('sel_topic',''))
+            c1, c2 = st.columns(2)
+            with c1: type_ = st.selectbox("类型", ["辟谣", "测评", "揭秘"])
+            with c2: style = st.selectbox("风格", ["实拍", "动漫", "赛博"])
+            
+            if st.button("🚀 生成脚本"):
+                s = call_deepseek_once(f"写分镜脚本,类型{type_},风格{style}", topic)
+                st.session_state["last_script"] = s
+                st.rerun()
+            
+            if "last_script" in st.session_state:
+                st.markdown(st.session_state["last_script"])
+                if st.button("💾 保存脚本到数据库"):
+                    save_to_db("SCRIPT", f"脚本: {topic}", st.session_state["last_script"])
 
     with t2:
-        txt = st.text_area("文案")
-        if st.button("生成语音"):
+        st.subheader("🎙️ TTS 配音室")
+        txt = st.text_area("粘贴文案")
+        voice = st.selectbox("音色", ["zh-CN-YunxiNeural (男)", "zh-CN-XiaoxiaoNeural (女)"])
+        if st.button("🎧 生成"):
             try:
-                mp3 = asyncio.run(generate_speech(txt, "zh-CN-YunxiNeural"))
+                mp3 = asyncio.run(generate_speech(txt, voice.split(" ")[0]))
                 st.audio(mp3)
-            except: st.error("Error")
+                st.success("生成成功")
+            except: st.error("生成失败")
 
 # ==================================================
-# 模块 3: 历史档案库 (新功能!)
+# 模块 3: 历史档案库
 # ==================================================
 elif app_mode == "🗄️ 历史档案库 (Database)":
-    st.title("🗄️ 数字化研发档案")
-    st.markdown("这里存储了所有归档的 **实验记录 (ELN)** 和 **自媒体脚本**。")
+    st.title("🗄️ 研发与创作档案")
+    filter_type = st.radio("筛选", ["全部", "ELN", "SCRIPT", "IDEA"], horizontal=True)
+    t_map = {"全部":None, "ELN":"ELN", "SCRIPT":"SCRIPT", "IDEA":"IDEA"}
     
-    # 筛选器
-    filter_type = st.radio("筛选类型", ["全部", "ELN (实验记录)", "SCRIPT (脚本)"], horizontal=True)
-    type_map = {"全部": None, "ELN (实验记录)": "ELN", "SCRIPT (脚本)": "SCRIPT"}
-    
-    # 获取数据
-    records = get_history(type_map[filter_type])
-    
-    if not records:
-        st.info("暂无存档记录。请去 R&D 或 自媒体模块 生成并保存。")
-    else:
-        for rec in records:
-            # rec结构: (id, type, title, content, timestamp)
-            r_id, r_type, r_title, r_content, r_time = rec
-            
-            with st.expander(f"{r_time} | [{r_type}] {r_title}"):
-                st.caption(f"记录ID: {r_id}")
-                st.markdown(r_content)
-                st.download_button(
-                    f"📥 导出此记录", 
-                    r_content, 
-                    file_name=f"{r_type}_{r_time}.md"
-                )
+    recs = get_history(t_map[filter_type])
+    if not recs: st.info("暂无记录")
+    for r in recs:
+        with st.expander(f"{r[4]} | [{r[1]}] {r[2]}"):
+            st.markdown(r[3])
+            st.download_button("导出", r[3], f"{r[1]}_{r[0]}.md")
 
 # ==================================================
 # 模块 4: 云端看板
 # ==================================================
 elif app_mode == "⚙️ 云端数据看板":
-    st.title("⚙️ 监控")
+    st.title("⚙️ 系统监控")
     st.info("daily_task.py 运行正常")
+    if st.button("测试推送"):
+        if "BARK_SERVER" in st.secrets:
+            requests.get(f"{st.secrets['BARK_SERVER']}/{st.secrets['BARK_DEVICE_KEY']}/测试")
+            st.success("Sent")
