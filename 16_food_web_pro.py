@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 import re
-import pdfplumber
+import pdfplumber # 保留作为备用
 import pandas as pd
 import plotly.graph_objects as go
 import edge_tts
@@ -13,6 +13,10 @@ from datetime import datetime
 from io import BytesIO
 from PIL import Image
 from supabase import create_client, Client
+
+# --- RAG 2.0 核心组件 (v11.0 新增) ---
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_pinecone import PineconeVectorStore
 
 # --- 1. 页面基础配置 ---
 st.set_page_config(
@@ -55,10 +59,9 @@ try:
         return create_client(SUPABASE_URL, SUPABASE_KEY)
     supabase = init_supabase()
 except Exception as e:
-    st.sidebar.warning("⚠️ Supabase 配置未生效，云端存储功能暂时不可用。")
+    st.sidebar.warning("⚠️ Supabase 配置未生效")
 
 def save_to_db(record_type, title, content):
-    """保存数据到 Supabase Cloud"""
     if not supabase:
         st.error("数据库未连接")
         return
@@ -76,7 +79,6 @@ def save_to_db(record_type, title, content):
         st.sidebar.error(f"保存失败: {e}")
 
 def get_history(record_type=None):
-    """从 Supabase Cloud 拉取数据"""
     if not supabase: return []
     try:
         query = supabase.table("records").select("*").order("id", desc=True).limit(20)
@@ -85,11 +87,33 @@ def get_history(record_type=None):
         response = query.execute()
         return response.data
     except Exception as e:
-        st.sidebar.error(f"读取失败: {e}")
         return []
 
 # ==================================================
-#  配置与核心工具
+#  RAG 2.0 向量库连接 (Pinecone)
+# ==================================================
+@st.cache_resource
+def get_vector_store():
+    """初始化向量数据库连接"""
+    if "PINECONE_API_KEY" not in st.secrets:
+        return None
+    try:
+        # 使用轻量级模型 (与 ingest.py 保持一致)
+        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        
+        # 连接 Pinecone
+        vectorstore = PineconeVectorStore(
+            index_name="food-standards", # 确保和你建库的名字一样
+            embedding=embeddings,
+            pinecone_api_key=st.secrets["PINECONE_API_KEY"]
+        )
+        return vectorstore
+    except Exception as e:
+        print(f"Vector Store Error: {e}")
+        return None
+
+# ==================================================
+#  DeepSeek API & Tools
 # ==================================================
 if "DEEPSEEK_API_KEY" not in st.secrets:
     st.error("⚠️ Secrets 缺失 DEEPSEEK_API_KEY")
@@ -128,15 +152,6 @@ def ocr_image(file):
         return " ".join(load_ocr().readtext(np.array(Image.open(file)), detail=0))
     except Exception as e: return f"OCR Error: {e}"
 
-def extract_pdf(files):
-    c=""
-    for f in files:
-        try:
-            with pdfplumber.open(f) as pdf:
-                for p in pdf.pages[:5]: c+=p.extract_text()
-        except: pass
-    return c
-
 def generate_eln(messages):
     t = datetime.now().strftime("%Y-%m-%d %H:%M")
     rpt = f"# ELN Report\nTime: {t}\n\n"
@@ -145,8 +160,7 @@ def generate_eln(messages):
     return rpt
 
 def plot_nutrition_pie(data_dict):
-    if not data_dict:
-        data_dict = {"碳水": 0, "蛋白": 0, "脂肪": 0}
+    if not data_dict: data_dict = {"碳水": 0, "蛋白": 0, "脂肪": 0}
     fig = go.Figure(data=[go.Pie(labels=list(data_dict.keys()), values=list(data_dict.values()), hole=.3)])
     fig.update_layout(margin=dict(t=20,b=20,l=20,r=20), showlegend=True)
     return fig
@@ -156,8 +170,8 @@ def plot_radar(name, trend):
     if "酸奶" in name: vals = [3, 4, 1, 0, 2]
     elif "咖啡" in name: vals = [2, 3, 5, 0, 1]
     
-    if "0糖" in trend: vals[0] = max(0, values[0]-2)
-    if "高蛋白" in trend: vals[4] = min(5, values[4]+1)
+    if "0糖" in trend: vals[0] = max(0, vals[0]-2)
+    if "高蛋白" in trend: vals[4] = min(5, vals[4]+1)
     
     fig = go.Figure(go.Scatterpolar(r=vals, theta=['甜度', '酸度', '苦度', '咸度', '鲜度'], fill='toself', name=name))
     fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 5])), showlegend=False, margin=dict(t=20,b=20,l=40,r=40))
@@ -167,7 +181,7 @@ def plot_radar(name, trend):
 #  主界面逻辑
 # ==================================================
 st.sidebar.title("🧬 FoodMaster Pro")
-st.sidebar.caption("食品硕士的云端解决方案 v10.1")
+st.sidebar.caption("v11.1 | RAG 2.0 终极融合版") # 版本号更新
 app_mode = st.sidebar.selectbox("工作模式", ["🔬 R&D 研发中心", "🎬 自媒体工厂", "🗄️ 云端档案库", "⚙️ 云端监控"])
 
 # --------------------------------------------------
@@ -201,8 +215,8 @@ if app_mode == "🔬 R&D 研发中心":
             q = next((m['content'] for m in st.session_state["msg_law"] if m['role']=='user'), "记录")
             save_to_db("ELN", f"对话: {q[:10]}", report)
 
-    # 5大功能区
-    tabs = st.tabs(["💬 法规对话", "🧪 智能配方", "📸 视觉分析", "📄 文档Chat", "📊 新品概念"])
+    # 5大功能区 (Tab 4 名字改为 行业大脑)
+    tabs = st.tabs(["💬 法规对话", "🧪 智能配方", "📸 视觉分析", "🧠 行业大脑(RAG)", "📊 新品概念"])
 
     # --- Tab 1: 法规对话 ---
     with tabs[0]:
@@ -225,29 +239,21 @@ if app_mode == "🔬 R&D 研发中心":
                     r, a = call_deepseek_advanced(st.session_state["msg_law"], current_model)
                 if r: st.expander("🧠 思维链 (CoT)").markdown(r)
                 st.markdown(a)
-                st.caption("🛡️ 核实链接：")
-                c1, c2 = st.columns(2)
-                with c1: st.link_button("🔗 食品伙伴网", f"http://www.foodmate.net/search.php?kw={p}")
-                with c2: st.link_button("🔗 卫健委", "https://ssp.nhc.gov.cn/database/standards/list.html")
                 st.session_state["msg_law"].append({"role":"assistant","content":a,"reasoning":r})
 
-    # --- Tab 2: 智能配方 (修复保存Bug) ---
+    # --- Tab 2: 智能配方 (保留了你的修复) ---
     with tabs[1]:
         st.subheader("🧪 智能配方计算器")
         txt = st.text_area("输入配方 (如: 生牛乳85%, 白砂糖10%, 浓缩乳清蛋白4%, 果胶0.8%, 山梨酸钾0.2%)", height=100)
         
-        # 1. 点击生成，存入 session_state
         if st.button("🧮 启动配方引擎"):
             with st.spinner("R1 正在逆向拆解配方结构..."):
                 sys = "你是一名配方工程师。请提取原料百分比，计算营养成分(蛋/脂/碳)，并进行GB2760合规预警。请以JSON格式输出预估营养占比(key为成分,value为数值)，然后在JSON后输出详细分析报告。"
                 r, a = call_deepseek_advanced([{"role":"system","content":sys},{"role":"user","content":txt}], "reasoner")
-                
-                # 存入记忆
                 st.session_state["formula_res_a"] = a
                 st.session_state["formula_res_r"] = r
                 st.session_state["formula_txt"] = txt
         
-        # 2. 如果记忆里有结果，就显示出来（包括保存按钮）
         if "formula_res_a" in st.session_state:
             c1, c2 = st.columns([3, 2])
             with c1:
@@ -260,7 +266,6 @@ if app_mode == "🔬 R&D 研发中心":
                 st.plotly_chart(plot_nutrition_pie(plot_data))
             
             st.markdown("---")
-            # 这个按钮现在在外层，绝对能点动了！
             if st.button("💾 云端保存配方"): 
                 save_to_db("FORMULA", f"配方: {st.session_state['formula_txt'][:10]}", st.session_state["formula_res_a"])
 
@@ -283,32 +288,48 @@ if app_mode == "🔬 R&D 研发中心":
                 st.markdown("### 🛡️ 风险评估报告")
                 if r: st.expander("🧠 评估逻辑").markdown(r)
                 st.markdown(a)
-                
                 st.session_state["msg_law"].append({"role":"user","content":f"[OCR]{txt}"})
                 st.session_state["msg_law"].append({"role":"assistant","content":a})
 
-    # --- Tab 4: 文档 ---
+    # --- Tab 4: 行业大脑 (RAG 2.0 核心) ---
     with tabs[3]:
-        st.subheader("📄 文档问答")
-        fs = st.file_uploader("上传PDF", "pdf", True)
-        if fs and st.button("📥 读取文档"):
-            with st.spinner("正在解析 PDF 文本层..."):
-                st.session_state["doc_c"] = extract_pdf(fs)
-                st.session_state["doc_m"] = [{"role":"system","content":f"基于:\n{st.session_state['doc_c'][:8000]}"}]
-            st.success("文档已装载到上下文")
+        st.subheader("🧠 行业大脑：全量法规检索 (Pinecone)")
+        st.info("💡 已连接 Pinecone 向量知识库。无需上传 PDF，直接提问即可检索已入库的数百份国标。")
+        
+        vector_store = get_vector_store()
+        
+        if not vector_store:
+            st.warning("⚠️ 未检测到 PINECONE_API_KEY，请先在 Secrets 中配置。目前仅支持基础对话。")
+        else:
+            query = st.text_input("输入你要查询的法规问题 (例如: GB2760中关于山梨酸钾的规定)")
             
-        if "doc_m" in st.session_state:
-            for m in st.session_state["doc_m"]:
-                if m['role']!='system': st.chat_message(m['role']).markdown(m['content'])
-            if p:=st.chat_input("问文档", key="doc"):
-                st.session_state["doc_m"].append({"role":"user","content":p})
-                st.chat_message("user").markdown(p)
-                with st.spinner("正在检索文档片段..."):
-                    r, a = call_deepseek_advanced(st.session_state["doc_m"], current_model)
-                st.chat_message("assistant").markdown(a)
-                st.session_state["doc_m"].append({"role":"assistant","content":a})
+            if st.button("🔍 深度检索"):
+                if not query:
+                    st.warning("请输入问题")
+                else:
+                    # 1. 检索
+                    with st.spinner("正在 Pinecone 向量海中搜寻相关片段..."):
+                        docs = vector_store.similarity_search(query, k=3)
+                        context_str = "\n\n".join([f"【来源：{d.metadata.get('source', '未知文档')}】\n{d.page_content}" for d in docs])
+                    
+                    # 2. 展示检索到的证据
+                    with st.expander("查看检索到的法规原文片段 (Evidence)"):
+                        st.markdown(context_str)
+                    
+                    # 3. AI 回答
+                    with st.spinner("DeepSeek R1 正在基于证据进行推理..."):
+                        prompt = f"你是一名食品法规专家。请严格基于以下【参考文档】回答用户问题。\n如果文档中没有答案，请直接说“知识库中未找到相关条款”。\n\n【参考文档】：\n{context_str}\n\n用户问题：{query}"
+                        r, a = call_deepseek_advanced([{"role":"user","content":prompt}], current_model)
+                    
+                    if r: st.expander("🧠 法律推理过程").markdown(r)
+                    st.markdown("### ⚖️ 法律意见")
+                    st.markdown(a)
+                    
+                    # 4. 保存
+                    if st.button("💾 归档检索记录"):
+                        save_to_db("RAG", f"检索: {query}", f"Q:{query}\n\nEvidence:\n{context_str}\n\nA:{a}")
 
-    # --- Tab 5: 新品 (修复保存Bug) ---
+    # --- Tab 5: 新品 (保留了你的修复) ---
     with tabs[4]:
         st.subheader("💡 概念生成")
         col1, col2 = st.columns(2)
@@ -316,27 +337,24 @@ if app_mode == "🔬 R&D 研发中心":
         with col2: target_user = st.text_input("目标人群", "减脂打工人")
         trend = st.selectbox("结合趋势", ["药食同源", "0糖0卡", "高蛋白", "助眠/解压", "清洁标签"])
         
-        # 1. 生成并存入 session_state
         if st.button("🧪 生成概念书"):
-            with st.spinner("🧠 AI 正在疯狂头脑风暴中 (约需20秒)..."):
+            with st.spinner("🧠 AI 正在疯狂头脑风暴中..."):
                 prompt = f"生成食品新品概念书，Markdown格式，包含卖点、配料、风味、包装建议。基底：{base_product}，人群：{target_user}，趋势：{trend}"
                 res = call_deepseek_once(prompt, "")
                 
             st.session_state["idea_res"] = res
             st.session_state["idea_base"] = base_product
         
-        # 2. 如果有结果，显示并允许保存
         if "idea_res" in st.session_state:
             st.markdown(st.session_state["idea_res"])
             st.markdown("#### 🧬 动态风味轮廓")
             st.plotly_chart(plot_radar(base_product, trend))
-            
             st.markdown("---")
             if st.button("💾 云端保存概念"): 
                 save_to_db("IDEA",f"概念:{st.session_state['idea_base']}", st.session_state["idea_res"])
 
 # --------------------------------------------------
-#  MODE 2: 自媒体工厂 (已自带session逻辑，无需修复)
+#  MODE 2: 自媒体工厂
 # --------------------------------------------------
 elif app_mode == "🎬 自媒体工厂":
     st.title("🎬 自动化内容工厂")
@@ -353,10 +371,8 @@ elif app_mode == "🎬 自媒体工厂":
         with c2:
             top = st.text_input("选题", sel if sel else "")
             c_type, c_style = st.columns(2)
-            with c_type:
-                script_type = st.selectbox("类型", ["辟谣粉碎机", "红黑榜测评", "行业内幕揭秘", "热点吃瓜解读"])
-            with c_style:
-                visual_style = st.selectbox("风格", ["实拍生活风", "宫崎骏动漫", "赛博朋克风", "微距美食"])
+            with c_type: script_type = st.selectbox("类型", ["辟谣粉碎机", "红黑榜测评", "行业内幕揭秘", "热点吃瓜解读"])
+            with c_style: visual_style = st.selectbox("风格", ["实拍生活风", "宫崎骏动漫", "赛博朋克风", "微距美食"])
             
             if st.button("🚀 生成脚本"):
                 with st.spinner("正在构建分镜表..."):
@@ -385,13 +401,10 @@ elif app_mode == "🎬 自媒体工厂":
 # --------------------------------------------------
 elif app_mode == "🗄️ 云端档案库":
     st.title("🗄️ 研发与创作档案 (Cloud)")
-    
     filter_type = st.radio("筛选", ["全部","ELN","FORMULA","SCRIPT","IDEA"], horizontal=True)
     t = None if filter_type=="全部" else filter_type
-    
     with st.spinner("正在从 Supabase 同步数据..."):
         recs = get_history(t)
-    
     if not recs:
         st.info("☁️ 云端数据库暂无数据，请去其他模块生成并保存。")
     else:
