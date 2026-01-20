@@ -12,7 +12,7 @@ import numpy as np
 from datetime import datetime
 from io import BytesIO
 from PIL import Image
-from supabase import create_client, Client # 新增：Supabase 库
+from supabase import create_client, Client
 
 # --- 1. 页面基础配置 ---
 st.set_page_config(
@@ -230,7 +230,7 @@ if app_mode == "🔬 R&D 研发中心":
     # Tab 2: 配方
     with tabs[1]:
         st.subheader("🧪 智能配方计算器")
-        txt = st.text_area("输入配方", height=100)
+        txt = st.text_area("输入配方 (如: 生牛乳85%, 白砂糖10%, 浓缩乳清蛋白4%, 果胶0.8%, 山梨酸钾0.2%)", height=100)
         if st.button("🧮 计算"):
             with st.spinner("R1 拆解中..."):
                 sys = "你是一名配方工程师。提取原料百分比，计算营养成分，进行GB2760预警。"
@@ -274,18 +274,23 @@ if app_mode == "🔬 R&D 研发中心":
                 st.chat_message("assistant").markdown(a)
                 st.session_state["doc_m"].append({"role":"assistant","content":a})
 
-    # Tab 5: 新品
+    # Tab 5: 新品 (🔥 满血恢复)
     with tabs[4]:
         st.subheader("💡 概念生成")
         c1,c2 = st.columns(2)
-        with c1: b=st.text_input("基底","酸奶")
-        with c2: u=st.text_input("人群","减脂")
-        t=st.selectbox("趋势",["药食同源","0糖"])
-        if st.button("生成"):
-            res=call_deepseek_once("生成概念书",f"{b} {u} {t}")
+        with c1: base_product = st.text_input("基底产品", "0糖酸奶")
+        with c2: target_user = st.text_input("目标人群", "减脂打工人")
+        
+        # 选项完全恢复
+        trend = st.selectbox("结合趋势", ["药食同源", "0糖0卡", "高蛋白", "助眠/解压", "清洁标签"])
+        
+        if st.button("生成概念"):
+            # Prompt 完整恢复
+            prompt = f"生成食品新品概念书，Markdown格式，包含卖点、配料、风味、包装建议。基底：{base_product}，人群：{target_user}，趋势：{trend}"
+            res = call_deepseek_once(prompt, "")
             st.markdown(res)
-            if st.button("💾 云端保存"): save_to_db("IDEA",f"概念:{b}",res)
-            st.plotly_chart(plot_radar(b,t))
+            if st.button("💾 云端保存"): save_to_db("IDEA",f"概念:{base_product}",res)
+            st.plotly_chart(plot_radar(base_product,trend))
 
 # --------------------------------------------------
 #  MODE 2: 自媒体工厂
@@ -303,12 +308,20 @@ elif app_mode == "🎬 自媒体工厂":
                 sel = st.radio("热点", ts, index=None)
             except: sel=None
         with c2:
-            top=st.text_input("选题",sel if sel else "")
-            t_=st.selectbox("类型",["辟谣","测评","揭秘"])
-            s_=st.selectbox("风格",["实拍","动漫","赛博"])
-            if st.button("生成"):
-                s=call_deepseek_once(f"写脚本,类型{t_},风格{s_}",top)
-                st.session_state["scr"]=s
+            top = st.text_input("选题", sel if sel else "")
+            
+            # 🔥 选项完全恢复
+            c_type, c_style = st.columns(2)
+            with c_type:
+                script_type = st.selectbox("类型", ["辟谣粉碎机", "红黑榜测评", "行业内幕揭秘", "热点吃瓜解读"])
+            with c_style:
+                visual_style = st.selectbox("风格", ["实拍生活风", "宫崎骏动漫", "赛博朋克风", "微距美食"])
+            
+            if st.button("生成脚本"):
+                # Prompt 完整恢复
+                p = f"我是食品科普博主。选题：{top}。类型：{script_type}。风格：{visual_style}。请输出Markdown分镜表格。"
+                s = call_deepseek_once(p, "")
+                st.session_state["scr"] = s
                 st.rerun()
             if "scr" in st.session_state:
                 st.markdown(st.session_state["scr"])
@@ -316,7 +329,7 @@ elif app_mode == "🎬 自媒体工厂":
 
     with t2:
         txt=st.text_area("文案")
-        v=st.selectbox("音色",["zh-CN-YunxiNeural","zh-CN-XiaoxiaoNeural"])
+        v=st.selectbox("音色",["zh-CN-YunxiNeural (男声)","zh-CN-XiaoxiaoNeural (女声)","zh-CN-YunjianNeural (新闻)"])
         if st.button("生成语音"):
             try: st.audio(asyncio.run(generate_speech(txt,v.split(" ")[0])))
             except: st.error("Error")
