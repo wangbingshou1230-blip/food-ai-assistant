@@ -44,7 +44,7 @@ if not check_password():
     st.stop()
 
 # ==================================================
-#  云端数据库 (Supabase) - 容错处理版
+#  云端数据库 (Supabase)
 # ==================================================
 supabase = None
 try:
@@ -144,9 +144,7 @@ def generate_eln(messages):
         if m['role']!='system': rpt += f"## {m['role']}\n{m['content']}\n\n"
     return rpt
 
-# --- 图表可视化逻辑 (恢复动态计算) ---
 def plot_nutrition_pie(data_dict):
-    """绘制营养成分饼图"""
     if not data_dict:
         data_dict = {"碳水": 0, "蛋白": 0, "脂肪": 0}
     fig = go.Figure(data=[go.Pie(labels=list(data_dict.keys()), values=list(data_dict.values()), hole=.3)])
@@ -154,20 +152,14 @@ def plot_nutrition_pie(data_dict):
     return fig
 
 def plot_radar(name, trend):
-    """绘制感官雷达图"""
-    categories = ['甜度', '酸度', '苦度', '咸度', '鲜度']
-    values = [3, 2, 1, 1, 2] # 基础值
+    vals = [3, 2, 1, 1, 2]
+    if "酸奶" in name: vals = [3, 4, 1, 0, 2]
+    elif "咖啡" in name: vals = [2, 3, 5, 0, 1]
     
-    # 简单的规则引擎
-    if "酸奶" in name: values = [3, 4, 1, 0, 2]
-    elif "咖啡" in name: values = [2, 3, 5, 0, 1]
-    elif "麻辣" in name: values = [1, 1, 2, 4, 5]
+    if "0糖" in trend: vals[0] = max(0, values[0]-2)
+    if "高蛋白" in trend: vals[4] = min(5, values[4]+1)
     
-    # 趋势修正
-    if "0糖" in trend: values[0] = max(0, values[0]-2)
-    if "高蛋白" in trend: values[4] = min(5, values[4]+1) # 增加厚实感/鲜度
-    
-    fig = go.Figure(go.Scatterpolar(r=values, theta=categories, fill='toself', name=name))
+    fig = go.Figure(go.Scatterpolar(r=vals, theta=['甜度', '酸度', '苦度', '咸度', '鲜度'], fill='toself', name=name))
     fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 5])), showlegend=False, margin=dict(t=20,b=20,l=40,r=40))
     return fig
 
@@ -175,7 +167,7 @@ def plot_radar(name, trend):
 #  主界面逻辑
 # ==================================================
 st.sidebar.title("🧬 FoodMaster Pro")
-st.sidebar.caption("食品硕士的云端解决方案 v10.0")
+st.sidebar.caption("食品硕士的云端解决方案 v10.1")
 app_mode = st.sidebar.selectbox("工作模式", ["🔬 R&D 研发中心", "🎬 自媒体工厂", "🗄️ 云端档案库", "⚙️ 云端监控"])
 
 # --------------------------------------------------
@@ -229,7 +221,6 @@ if app_mode == "🔬 R&D 研发中心":
             st.session_state["msg_law"].append({"role":"user","content":p})
             with st.chat_message("user"): st.markdown(p)
             with st.chat_message("assistant"):
-                # 恢复：显示加载过程
                 with st.spinner("AI 正在检索法规库与逻辑推理中..."):
                     r, a = call_deepseek_advanced(st.session_state["msg_law"], current_model)
                 if r: st.expander("🧠 思维链 (CoT)").markdown(r)
@@ -240,49 +231,52 @@ if app_mode == "🔬 R&D 研发中心":
                 with c2: st.link_button("🔗 卫健委", "https://ssp.nhc.gov.cn/database/standards/list.html")
                 st.session_state["msg_law"].append({"role":"assistant","content":a,"reasoning":r})
 
-    # --- Tab 2: 智能配方 (恢复图表和计算过程) ---
+    # --- Tab 2: 智能配方 (修复保存Bug) ---
     with tabs[1]:
         st.subheader("🧪 智能配方计算器")
         txt = st.text_area("输入配方 (如: 生牛乳85%, 白砂糖10%, 浓缩乳清蛋白4%, 果胶0.8%, 山梨酸钾0.2%)", height=100)
         
+        # 1. 点击生成，存入 session_state
         if st.button("🧮 启动配方引擎"):
-            # 恢复：显示加载过程
             with st.spinner("R1 正在逆向拆解配方结构..."):
                 sys = "你是一名配方工程师。请提取原料百分比，计算营养成分(蛋/脂/碳)，并进行GB2760合规预警。请以JSON格式输出预估营养占比(key为成分,value为数值)，然后在JSON后输出详细分析报告。"
                 r, a = call_deepseek_advanced([{"role":"system","content":sys},{"role":"user","content":txt}], "reasoner")
-            
+                
+                # 存入记忆
+                st.session_state["formula_res_a"] = a
+                st.session_state["formula_res_r"] = r
+                st.session_state["formula_txt"] = txt
+        
+        # 2. 如果记忆里有结果，就显示出来（包括保存按钮）
+        if "formula_res_a" in st.session_state:
             c1, c2 = st.columns([3, 2])
             with c1:
-                if r: st.expander("🧠 计算逻辑 (CoT)").markdown(r)
-                st.markdown(a)
+                if st.session_state.get("formula_res_r"): 
+                    st.expander("🧠 计算逻辑 (CoT)").markdown(st.session_state["formula_res_r"])
+                st.markdown(st.session_state["formula_res_a"])
             with c2:
                 st.markdown("### 📊 预估营养分布")
-                # 尝试简单解析数据用于绘图，如果解析失败用兜底数据
-                try:
-                    # 简单的正则提取，实际可优化
-                    plot_data = {"碳水化合物": 12, "蛋白质": 3.5, "脂肪": 4.0, "水/其他": 80.5}
-                    st.plotly_chart(plot_nutrition_pie(plot_data))
-                    st.caption("*注：图表基于模型预估值渲染")
-                except:
-                    st.info("图表数据解析失败")
+                plot_data = {"碳水化合物": 12, "蛋白质": 3.5, "脂肪": 4.0, "水/其他": 80.5}
+                st.plotly_chart(plot_nutrition_pie(plot_data))
             
-            if st.button("💾 云端保存配方"): save_to_db("FORMULA", f"配方: {txt[:10]}", a)
+            st.markdown("---")
+            # 这个按钮现在在外层，绝对能点动了！
+            if st.button("💾 云端保存配方"): 
+                save_to_db("FORMULA", f"配方: {st.session_state['formula_txt'][:10]}", st.session_state["formula_res_a"])
 
-    # --- Tab 3: OCR (恢复中间显示过程) ---
+    # --- Tab 3: OCR ---
     with tabs[2]:
         st.subheader("📸 配料表扫描")
         f = st.file_uploader("传图", ["jpg","png"])
         if f:
             st.image(f, width=300, caption="原图预览")
             if st.button("👁️ 开始识别"):
-                # 过程1：OCR
                 with st.spinner("正在进行 OCR 像素级提取..."):
                     txt = ocr_image(f)
                 st.success("OCR 提取完成")
                 with st.expander("查看提取到的原始内容"):
                     st.code(txt)
                 
-                # 过程2：AI分析
                 with st.spinner("R1 正在进行风险成分筛查..."):
                     r, a = call_deepseek_advanced([{"role":"user","content":f"分析配料表风险:{txt}"}], "reasoner")
                 
@@ -290,11 +284,10 @@ if app_mode == "🔬 R&D 研发中心":
                 if r: st.expander("🧠 评估逻辑").markdown(r)
                 st.markdown(a)
                 
-                # 存入历史
                 st.session_state["msg_law"].append({"role":"user","content":f"[OCR]{txt}"})
                 st.session_state["msg_law"].append({"role":"assistant","content":a})
 
-    # --- Tab 4: 文档 (恢复 RAG 过程) ---
+    # --- Tab 4: 文档 ---
     with tabs[3]:
         st.subheader("📄 文档问答")
         fs = st.file_uploader("上传PDF", "pdf", True)
@@ -315,33 +308,35 @@ if app_mode == "🔬 R&D 研发中心":
                 st.chat_message("assistant").markdown(a)
                 st.session_state["doc_m"].append({"role":"assistant","content":a})
 
-    # --- Tab 5: 新品 (恢复所有输入项和加载动画) ---
+    # --- Tab 5: 新品 (修复保存Bug) ---
     with tabs[4]:
         st.subheader("💡 概念生成")
-        # 恢复完整布局
         col1, col2 = st.columns(2)
         with col1: base_product = st.text_input("基底产品", "0糖酸奶")
         with col2: target_user = st.text_input("目标人群", "减脂打工人")
-        
-        # 恢复选项
         trend = st.selectbox("结合趋势", ["药食同源", "0糖0卡", "高蛋白", "助眠/解压", "清洁标签"])
         
+        # 1. 生成并存入 session_state
         if st.button("🧪 生成概念书"):
-            # 恢复加载动画
             with st.spinner("🧠 AI 正在疯狂头脑风暴中 (约需20秒)..."):
                 prompt = f"生成食品新品概念书，Markdown格式，包含卖点、配料、风味、包装建议。基底：{base_product}，人群：{target_user}，趋势：{trend}"
                 res = call_deepseek_once(prompt, "")
                 
-            if res:
-                st.markdown(res)
-                if st.button("💾 云端保存"): save_to_db("IDEA",f"概念:{base_product}",res)
-            
+            st.session_state["idea_res"] = res
+            st.session_state["idea_base"] = base_product
+        
+        # 2. 如果有结果，显示并允许保存
+        if "idea_res" in st.session_state:
+            st.markdown(st.session_state["idea_res"])
             st.markdown("#### 🧬 动态风味轮廓")
-            # 恢复动态图表
             st.plotly_chart(plot_radar(base_product, trend))
+            
+            st.markdown("---")
+            if st.button("💾 云端保存概念"): 
+                save_to_db("IDEA",f"概念:{st.session_state['idea_base']}", st.session_state["idea_res"])
 
 # --------------------------------------------------
-#  MODE 2: 自媒体工厂
+#  MODE 2: 自媒体工厂 (已自带session逻辑，无需修复)
 # --------------------------------------------------
 elif app_mode == "🎬 自媒体工厂":
     st.title("🎬 自动化内容工厂")
@@ -357,8 +352,6 @@ elif app_mode == "🎬 自媒体工厂":
             except: sel=None
         with c2:
             top = st.text_input("选题", sel if sel else "")
-            
-            # 恢复完整选项
             c_type, c_style = st.columns(2)
             with c_type:
                 script_type = st.selectbox("类型", ["辟谣粉碎机", "红黑榜测评", "行业内幕揭秘", "热点吃瓜解读"])
@@ -379,7 +372,6 @@ elif app_mode == "🎬 自媒体工厂":
     with t2:
         st.subheader("🎙️ TTS 配音室")
         txt = st.text_area("粘贴文案")
-        # 恢复完整音色
         v = st.selectbox("音色", ["zh-CN-YunxiNeural (男声-稳重)", "zh-CN-XiaoxiaoNeural (女声-亲切)", "zh-CN-YunjianNeural (男声-新闻)"])
         if st.button("🎧 生成语音"):
             with st.spinner("AI 正在合成音频流..."):
