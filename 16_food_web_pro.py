@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 import re
-import pdfplumber # 保留作为备用
+import pdfplumber
 import pandas as pd
 import plotly.graph_objects as go
 import edge_tts
@@ -14,7 +14,7 @@ from io import BytesIO
 from PIL import Image
 from supabase import create_client, Client
 
-# --- RAG 2.0 核心组件 (v11.0 新增) ---
+# --- RAG 2.0 核心组件 ---
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_pinecone import PineconeVectorStore
 
@@ -94,22 +94,17 @@ def get_history(record_type=None):
 # ==================================================
 @st.cache_resource
 def get_vector_store():
-    """初始化向量数据库连接"""
     if "PINECONE_API_KEY" not in st.secrets:
         return None
     try:
-        # 使用轻量级模型 (与 ingest.py 保持一致)
         embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-        
-        # 连接 Pinecone
         vectorstore = PineconeVectorStore(
-            index_name="food-standards", # 确保和你建库的名字一样
+            index_name="food-standards",
             embedding=embeddings,
             pinecone_api_key=st.secrets["PINECONE_API_KEY"]
         )
         return vectorstore
     except Exception as e:
-        print(f"Vector Store Error: {e}")
         return None
 
 # ==================================================
@@ -181,7 +176,7 @@ def plot_radar(name, trend):
 #  主界面逻辑
 # ==================================================
 st.sidebar.title("🧬 FoodMaster Pro")
-st.sidebar.caption("v11.1 | RAG 2.0 终极融合版") # 版本号更新
+st.sidebar.caption("v11.4 | 体验优化版") 
 app_mode = st.sidebar.selectbox("工作模式", ["🔬 R&D 研发中心", "🎬 自媒体工厂", "🗄️ 云端档案库", "⚙️ 云端监控"])
 
 # --------------------------------------------------
@@ -191,17 +186,18 @@ if app_mode == "🔬 R&D 研发中心":
     st.title("🔬 智能研发与法规助手")
     
     st.sidebar.markdown("---")
-    st.sidebar.subheader("🧠 大脑配置")
-    model_choice = st.sidebar.radio("模型", ["🚀 V3 极速版", "🧠 R1 深度思考"], 0)
+    st.sidebar.subheader("🧠 自由大脑配置")
+    # UX优化：明确告知用户这里的设置只管哪里
+    model_choice = st.sidebar.radio("对话/检索模型", ["🚀 V3 极速版", "🧠 R1 深度思考"], 0)
+    st.sidebar.caption("ℹ️ 注：配方计算、风险分析等专业任务将自动强制使用 R1 以确保精确性；新品生成等创意任务自动使用 V3。")
+    
     current_model = "reasoner" if "R1" in model_choice else "chat"
 
-    # 防幻觉 Prompt
+    # 基础 Prompt
     strict_prompt = """
     你是一名严谨的食品法规合规专家。核心原则：【依据事实，拒绝幻觉】。
     1. 引用标准：必须明确引用具体标准号（如 GB 2760-2024）。
     2. 保守回答：不确定请回答“需核实”，严禁编造。
-    3. 数据敏感：限量必须精确。
-    4. 思考过程：先逻辑分析，再给结论。
     """
     if "msg_law" not in st.session_state:
         st.session_state["msg_law"] = [{"role": "system", "content": strict_prompt}]
@@ -215,11 +211,12 @@ if app_mode == "🔬 R&D 研发中心":
             q = next((m['content'] for m in st.session_state["msg_law"] if m['role']=='user'), "记录")
             save_to_db("ELN", f"对话: {q[:10]}", report)
 
-    # 5大功能区 (Tab 4 名字改为 行业大脑)
+    # 5大功能区
     tabs = st.tabs(["💬 法规对话", "🧪 智能配方", "📸 视觉分析", "🧠 行业大脑(RAG)", "📊 新品概念"])
 
     # --- Tab 1: 法规对话 ---
     with tabs[0]:
+        st.caption(f"当前模式：{'🧠 R1 深度思考' if current_model == 'reasoner' else '🚀 V3 极速响应'} (跟随侧边栏设置)")
         for m in st.session_state["msg_law"]:
             if m['role']!='system':
                 with st.chat_message(m['role']):
@@ -241,14 +238,15 @@ if app_mode == "🔬 R&D 研发中心":
                 st.markdown(a)
                 st.session_state["msg_law"].append({"role":"assistant","content":a,"reasoning":r})
 
-    # --- Tab 2: 智能配方 (保留了你的修复) ---
+    # --- Tab 2: 智能配方 ---
     with tabs[1]:
         st.subheader("🧪 智能配方计算器")
-        txt = st.text_area("输入配方 (如: 生牛乳85%, 白砂糖10%, 浓缩乳清蛋白4%, 果胶0.8%, 山梨酸钾0.2%)", height=100)
+        st.caption("🔒 已自动锁定：DeepSeek-R1 (深度思考模式) | 原因：确保配方逆向与营养计算的数学精确性")
+        txt = st.text_area("输入配方", height=100)
         
         if st.button("🧮 启动配方引擎"):
             with st.spinner("R1 正在逆向拆解配方结构..."):
-                sys = "你是一名配方工程师。请提取原料百分比，计算营养成分(蛋/脂/碳)，并进行GB2760合规预警。请以JSON格式输出预估营养占比(key为成分,value为数值)，然后在JSON后输出详细分析报告。"
+                sys = "你是一名配方工程师。请提取原料百分比，计算营养成分，并进行GB2760合规预警。输出JSON和详细分析。"
                 r, a = call_deepseek_advanced([{"role":"system","content":sys},{"role":"user","content":txt}], "reasoner")
                 st.session_state["formula_res_a"] = a
                 st.session_state["formula_res_r"] = r
@@ -258,10 +256,9 @@ if app_mode == "🔬 R&D 研发中心":
             c1, c2 = st.columns([3, 2])
             with c1:
                 if st.session_state.get("formula_res_r"): 
-                    st.expander("🧠 计算逻辑 (CoT)").markdown(st.session_state["formula_res_r"])
+                    st.expander("🧠 计算逻辑").markdown(st.session_state["formula_res_r"])
                 st.markdown(st.session_state["formula_res_a"])
             with c2:
-                st.markdown("### 📊 预估营养分布")
                 plot_data = {"碳水化合物": 12, "蛋白质": 3.5, "脂肪": 4.0, "水/其他": 80.5}
                 st.plotly_chart(plot_nutrition_pie(plot_data))
             
@@ -272,84 +269,96 @@ if app_mode == "🔬 R&D 研发中心":
     # --- Tab 3: OCR ---
     with tabs[2]:
         st.subheader("📸 配料表扫描")
+        st.caption("🔒 已自动锁定：DeepSeek-R1 (深度思考模式) | 原因：防止 OCR 识别错误及添加剂风险漏判")
         f = st.file_uploader("传图", ["jpg","png"])
         if f:
             st.image(f, width=300, caption="原图预览")
             if st.button("👁️ 开始识别"):
-                with st.spinner("正在进行 OCR 像素级提取..."):
+                with st.spinner("正在进行 OCR..."):
                     txt = ocr_image(f)
                 st.success("OCR 提取完成")
-                with st.expander("查看提取到的原始内容"):
-                    st.code(txt)
-                
-                with st.spinner("R1 正在进行风险成分筛查..."):
+                with st.spinner("R1 正在分析..."):
                     r, a = call_deepseek_advanced([{"role":"user","content":f"分析配料表风险:{txt}"}], "reasoner")
                 
-                st.markdown("### 🛡️ 风险评估报告")
-                if r: st.expander("🧠 评估逻辑").markdown(r)
-                st.markdown(a)
+                st.session_state["ocr_txt"] = txt
+                st.session_state["ocr_res_a"] = a
+                st.session_state["ocr_res_r"] = r
+
                 st.session_state["msg_law"].append({"role":"user","content":f"[OCR]{txt}"})
                 st.session_state["msg_law"].append({"role":"assistant","content":a})
 
-    # --- Tab 4: 行业大脑 (RAG 2.0 核心) ---
+            if "ocr_res_a" in st.session_state:
+                st.code(st.session_state["ocr_txt"], language='text')
+                st.markdown("### 🛡️ 风险评估报告")
+                if st.session_state.get("ocr_res_r"):
+                    st.expander("🧠 评估逻辑").markdown(st.session_state["ocr_res_r"])
+                st.markdown(st.session_state["ocr_res_a"])
+                st.info("💡 提示：该记录已自动同步到【法规对话】Tab 中。")
+
+    # --- Tab 4: 行业大脑 ---
     with tabs[3]:
         st.subheader("🧠 行业大脑：全量法规检索 (Pinecone)")
+        st.caption(f"当前模式：{'🧠 R1 深度思考' if current_model == 'reasoner' else '🚀 V3 极速响应'} (跟随侧边栏设置)")
         st.info("💡 已连接 Pinecone 向量知识库。无需上传 PDF，直接提问即可检索已入库的数百份国标。")
         
         vector_store = get_vector_store()
         
         if not vector_store:
-            st.warning("⚠️ 未检测到 PINECONE_API_KEY，请先在 Secrets 中配置。目前仅支持基础对话。")
+            st.warning("⚠️ 未检测到 PINECONE_API_KEY")
         else:
-            query = st.text_input("输入你要查询的法规问题 (例如: GB2760中关于山梨酸钾的规定)")
+            query = st.text_input("输入你要查询的法规问题")
             
             if st.button("🔍 深度检索"):
                 if not query:
                     st.warning("请输入问题")
                 else:
-                    # 1. 检索
-                    with st.spinner("正在 Pinecone 向量海中搜寻相关片段..."):
+                    with st.spinner("正在 Pinecone 向量海中搜寻..."):
                         docs = vector_store.similarity_search(query, k=3)
-                        context_str = "\n\n".join([f"【来源：{d.metadata.get('source', '未知文档')}】\n{d.page_content}" for d in docs])
+                        context_str = "\n\n".join([f"【来源：{d.metadata.get('source', '未知')}】\n{d.page_content}" for d in docs])
                     
-                    # 2. 展示检索到的证据
-                    with st.expander("查看检索到的法规原文片段 (Evidence)"):
-                        st.markdown(context_str)
-                    
-                    # 3. AI 回答
-                    with st.spinner("DeepSeek R1 正在基于证据进行推理..."):
-                        prompt = f"你是一名食品法规专家。请严格基于以下【参考文档】回答用户问题。\n如果文档中没有答案，请直接说“知识库中未找到相关条款”。\n\n【参考文档】：\n{context_str}\n\n用户问题：{query}"
+                    with st.spinner("DeepSeek R1 正在推理..."):
+                        prompt = f"你是一名食品法规专家。基于以下【参考文档】回答问题。\n\n【参考文档】：\n{context_str}\n\n问题：{query}"
                         r, a = call_deepseek_advanced([{"role":"user","content":prompt}], current_model)
                     
-                    if r: st.expander("🧠 法律推理过程").markdown(r)
-                    st.markdown("### ⚖️ 法律意见")
-                    st.markdown(a)
-                    
-                    # 4. 保存
-                    if st.button("💾 归档检索记录"):
-                        save_to_db("RAG", f"检索: {query}", f"Q:{query}\n\nEvidence:\n{context_str}\n\nA:{a}")
+                    st.session_state["rag_res_a"] = a
+                    st.session_state["rag_res_r"] = r
+                    st.session_state["rag_context"] = context_str
+                    st.session_state["rag_query"] = query
 
-    # --- Tab 5: 新品 (保留了你的修复) ---
+            if "rag_res_a" in st.session_state:
+                with st.expander(f"📚 证据来源 ({st.session_state.get('rag_query', '')})"):
+                    st.markdown(st.session_state["rag_context"])
+                
+                if st.session_state.get("rag_res_r"):
+                    st.expander("🧠 法律推理过程").markdown(st.session_state["rag_res_r"])
+                
+                st.markdown("### ⚖️ 法律意见")
+                st.markdown(st.session_state["rag_res_a"])
+
+                st.markdown("---")
+                if st.button("💾 归档检索记录"):
+                    full_content = f"Q: {st.session_state['rag_query']}\n\nEvidence:\n{st.session_state['rag_context']}\n\nA:\n{st.session_state['rag_res_a']}"
+                    save_to_db("RAG", f"检索: {st.session_state['rag_query']}", full_content)
+
+    # --- Tab 5: 新品 ---
     with tabs[4]:
         st.subheader("💡 概念生成")
+        st.caption("⚡ 已自动锁定：DeepSeek-V3 (极速模式) | 原因：V3 具有更强的发散性思维，更适合创意脑暴")
         col1, col2 = st.columns(2)
         with col1: base_product = st.text_input("基底产品", "0糖酸奶")
         with col2: target_user = st.text_input("目标人群", "减脂打工人")
         trend = st.selectbox("结合趋势", ["药食同源", "0糖0卡", "高蛋白", "助眠/解压", "清洁标签"])
         
         if st.button("🧪 生成概念书"):
-            with st.spinner("🧠 AI 正在疯狂头脑风暴中..."):
-                prompt = f"生成食品新品概念书，Markdown格式，包含卖点、配料、风味、包装建议。基底：{base_product}，人群：{target_user}，趋势：{trend}"
+            with st.spinner("🧠 头脑风暴中..."):
+                prompt = f"生成食品新品概念书，Markdown格式。基底：{base_product}，人群：{target_user}，趋势：{trend}"
                 res = call_deepseek_once(prompt, "")
-                
             st.session_state["idea_res"] = res
             st.session_state["idea_base"] = base_product
         
         if "idea_res" in st.session_state:
             st.markdown(st.session_state["idea_res"])
-            st.markdown("#### 🧬 动态风味轮廓")
             st.plotly_chart(plot_radar(base_product, trend))
-            st.markdown("---")
             if st.button("💾 云端保存概念"): 
                 save_to_db("IDEA",f"概念:{st.session_state['idea_base']}", st.session_state["idea_res"])
 
@@ -358,6 +367,7 @@ if app_mode == "🔬 R&D 研发中心":
 # --------------------------------------------------
 elif app_mode == "🎬 自媒体工厂":
     st.title("🎬 自动化内容工厂")
+    st.caption("⚡ 已自动锁定：DeepSeek-V3 (极速模式) | 原因：生成脚本需要高网感和速度")
     t1, t2 = st.tabs(["📝 脚本", "🎙️ 配音"])
     with t1:
         c1,c2=st.columns([1,2])
@@ -401,12 +411,12 @@ elif app_mode == "🎬 自媒体工厂":
 # --------------------------------------------------
 elif app_mode == "🗄️ 云端档案库":
     st.title("🗄️ 研发与创作档案 (Cloud)")
-    filter_type = st.radio("筛选", ["全部","ELN","FORMULA","SCRIPT","IDEA"], horizontal=True)
+    filter_type = st.radio("筛选", ["全部","ELN","FORMULA","SCRIPT","IDEA","RAG"], horizontal=True)
     t = None if filter_type=="全部" else filter_type
     with st.spinner("正在从 Supabase 同步数据..."):
         recs = get_history(t)
     if not recs:
-        st.info("☁️ 云端数据库暂无数据，请去其他模块生成并保存。")
+        st.info("☁️ 云端数据库暂无数据。")
     else:
         for r in recs:
             with st.expander(f"{r['timestamp']} | [{r['type']}] {r['title']}"):
