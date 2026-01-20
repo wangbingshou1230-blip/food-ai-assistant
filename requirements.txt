@@ -1,13 +1,7 @@
 streamlit
-pandas
 requests
-openpyxl
 pdfplumber
-wordcloud
-matplotlib
-tabulate
-requests
-beautifulsoup4 
+pandas
 plotly
 beautifulsoup4
 edge-tts
@@ -15,3 +9,9 @@ easyocr
 opencv-python-headless
 numpy
 supabase
+pinecone-client
+langchain-pinecone
+langchain-community
+langchain-huggingface
+sentence-transformers
+pypdf
