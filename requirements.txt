@@ -15,3 +15,5 @@ langchain-community
 langchain-huggingface
 sentence-transformers
 pypdf
+langchain-pinecone>=0.1.0
+pinecone-client>=3.0.0
